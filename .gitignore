@@ -1,0 +1,14 @@
+# Build output
+build/
+.gradle/
+*.apk
+*.aab
+
+# Machine-specific
+local.properties
+.idea/
+*.iml
+.DS_Store
+
+# Generated at build time from the sources (see bundleSource in app/build.gradle)
+app/src/main/assets/source/
