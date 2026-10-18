@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#0E1116</color>
+    <color name="panel">#171B22</color>
+    <color name="accent">#2BD4A4</color>
+    <color name="text">#E8ECF1</color>
+    <color name="muted">#8A94A3</color>
+    <color name="tor">#9B6BFF</color>
+
+    <style name="Theme.Maxclean" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">@color/panel</item>
+        <item name="android:colorPrimaryDark">@color/bg</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/bg</item>
+        <item name="android:navigationBarColor">@color/bg</item>
+        <item name="android:textColorPrimary">@color/text</item>
+        <item name="android:textColorSecondary">@color/muted</item>
+    </style>
+</resources>

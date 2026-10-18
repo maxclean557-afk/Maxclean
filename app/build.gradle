@@ -1,0 +1,50 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'az.maxclean.browser'
+    compileSdk 34
+    buildToolsVersion '34.0.0'
+
+    defaultConfig {
+        applicationId 'az.maxclean.browser'
+        minSdk 26
+        targetSdk 34
+        versionCode 2
+        versionName '1.1'
+    }
+
+    packagingOptions {
+        jniLibs { useLegacyPackaging true }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.11.0'
+    // Tor itself (Guardian Project, the makers of Orbot), 0.4.8 long-term-support branch
+    implementation 'info.guardianproject:tor-android:0.4.8.22'
+    implementation 'info.guardianproject:jtorctl:0.4.5.7'
+}
+
+// Copies the browser's own source code into assets so the "Код браузера" screen can show it.
+tasks.register('bundleSource', Copy) {
+    from('src/main/java') { into 'java' }
+    from('src/main/res') { into 'res' }
+    from('src/main') { include 'AndroidManifest.xml' }
+    from('.') { include 'build.gradle' }
+    into 'src/main/assets/source'
+}
+preBuild.dependsOn bundleSource
