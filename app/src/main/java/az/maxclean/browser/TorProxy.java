@@ -17,27 +17,41 @@ import androidx.webkit.WebViewFeature;
 
 import org.torproject.jni.TorService;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executor;
 
+import IPtProxy.Controller;
+import IPtProxy.IPtProxy;
+import IPtProxy.OnTransportEvents;
+
 /**
- * Runs Tor inside Maxclean itself (no Orbot needed) and routes all WebView traffic — pages,
- * images, scripts and DNS — through it.
+ * Runs Tor inside Maxclean itself and routes all WebView traffic — pages, images, scripts and
+ * DNS — through it. Optionally Tor goes through bridges (obfs4, Snowflake, WebTunnel) so it
+ * works where Tor is blocked, and/or through the user's own proxy (xray, sing-box, v2rayNG).
  *
  * While Tor starts, the WebView is pointed at a dead proxy, so nothing can leave the phone
- * outside Tor. The proxy rule never has a DIRECT fallback.
+ * outside Tor. No proxy rule ever has a DIRECT fallback.
  */
 public final class TorProxy {
     /** Port 9 (discard) on localhost: every connection fails, nothing leaks. */
     private static final String BLACKHOLE = "socks5://127.0.0.1:9";
 
     public interface Listener {
-        void onStarting();
+        void onStarting(String how);
 
         void onReady(int socksPort);
 
         void onFailed(String message);
 
-        void onOff();
+        /** Tor is off; traffic goes direct, or through {@code proxy} if that is not empty. */
+        void onOff(String proxy);
     }
 
     private final Context app;
@@ -49,6 +63,9 @@ public final class TorProxy {
     private boolean bound;
     private boolean wanted;
     private boolean ready;
+    private int generation;
+    private Controller transports;
+    private Set<String> running;
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override
@@ -72,7 +89,7 @@ public final class TorProxy {
         @Override
         public void onServiceDisconnected(ComponentName name) {
             service = null;
-            if (wanted) fail("Tor неожиданно остановился. Нажмите 🧅, чтобы переподключиться.");
+            if (wanted) fail("Tor неожиданно остановился. Нажмите сюда, чтобы переподключиться.");
         }
     };
 
@@ -114,42 +131,122 @@ public final class TorProxy {
     }
 
     public void start() {
+        shutdown();
         wanted = true;
         ready = false;
+        int gen = ++generation;
         if (!isSupported()) {
             fail("Ваш системный WebView слишком старый для Tor. Обновите \"Android System WebView\".");
             return;
         }
-        listener.onStarting();
+        List<String> bridges = Bridges.lines(app);
+        String proxy = Bridges.proxyUrl(app);
+        if (Prefs.BRIDGES_CUSTOM.equals(Prefs.str(app, Prefs.BRIDGES, "")) && bridges.isEmpty()) {
+            fail("Вы выбрали свои мосты, но не вставили ни одного. Добавьте их в Настройках.");
+            return;
+        }
+        Set<String> needed = Bridges.transports(bridges);
+        String how = bridges.isEmpty() ? "" : " через мосты (" + String.join(", ", needed) + ")";
+        if (!proxy.isEmpty()) how += " через ваш прокси";
+        listener.onStarting(how);
         // Close the door first, then start Tor.
-        setProxy(BLACKHOLE, () -> {
-            if (!bound) {
-                bound = app.bindService(new Intent(app, TorService.class), connection, Context.BIND_AUTO_CREATE);
+        setProxy(BLACKHOLE, () -> new Thread(() -> {
+            try {
+                Map<String, Long> ports = startTransports(needed, proxy);
+                writeTorrc(Bridges.torrc(bridges, ports, proxy));
+            } catch (Exception e) {
+                fail("Не удалось запустить мосты: " + e.getMessage());
+                return;
             }
-            if (!bound) fail("Не удалось запустить Tor");
-        });
+            main.post(() -> {
+                if (!wanted || gen != generation) return;
+                bound = app.bindService(new Intent(app, TorService.class), connection, Context.BIND_AUTO_CREATE);
+                if (!bound) fail("Не удалось запустить Tor");
+            });
+        }).start());
     }
 
     public void stop() {
+        shutdown();
         wanted = false;
         ready = false;
+        generation++;
+        String proxy = Bridges.proxyUrl(app);
+        if (!isSupported()) {
+            listener.onOff("");
+            return;
+        }
+        if (proxy.isEmpty()) {
+            ProxyController.getInstance().clearProxyOverride(onMain, () -> listener.onOff(""));
+        } else {
+            // Without Tor, but through the user's own proxy (xray, sing-box…).
+            setProxy(proxy, () -> listener.onOff(proxy));
+        }
+    }
+
+    public void release() {
+        LocalBroadcastManager.getInstance(app).unregisterReceiver(statusReceiver);
+        shutdown();
+    }
+
+    private void shutdown() {
         if (bound) {
             app.unbindService(connection);
             bound = false;
             service = null;
         }
-        if (!isSupported()) {
-            listener.onOff();
-            return;
+        Controller c = transports;
+        Set<String> r = running;
+        transports = null;
+        running = null;
+        if (c != null && r != null) {
+            new Thread(() -> {
+                for (String t : r) {
+                    try {
+                        c.stop(t);
+                    } catch (Exception ignored) {
+                    }
+                }
+            }).start();
         }
-        ProxyController.getInstance().clearProxyOverride(onMain, listener::onOff);
     }
 
-    public void release() {
-        LocalBroadcastManager.getInstance(app).unregisterReceiver(statusReceiver);
-        if (bound) {
-            app.unbindService(connection);
-            bound = false;
+    private Map<String, Long> startTransports(Set<String> needed, String proxy) throws Exception {
+        Map<String, Long> ports = new LinkedHashMap<>();
+        if (needed.isEmpty()) return ports;
+        File state = new File(app.getFilesDir(), "pt_state");
+        //noinspection ResultOfMethodCallIgnored
+        state.mkdirs();
+        Controller c = IPtProxy.newController(state.getAbsolutePath(), false, false, "ERROR", new OnTransportEvents() {
+            @Override
+            public void connected(String name) {
+            }
+
+            @Override
+            public void error(String name, Exception e) {
+                fail("Мост " + name + " не работает: " + (e == null ? "" : e.getMessage()));
+            }
+
+            @Override
+            public void stopped(String name, Exception e) {
+            }
+        });
+        transports = c;
+        running = needed;
+        for (String t : needed) {
+            c.start(t, proxy);
+            ports.put(t, c.port(t));
+        }
+        return ports;
+    }
+
+    private void writeTorrc(String text) throws IOException {
+        File rc = TorService.getTorrc(app);
+        File dir = rc.getParentFile();
+        //noinspection ResultOfMethodCallIgnored
+        if (dir != null) dir.mkdirs();
+        try (FileOutputStream out = new FileOutputStream(rc, false)) {
+            out.write(text.getBytes(StandardCharsets.UTF_8));
         }
     }
 
@@ -164,7 +261,9 @@ public final class TorProxy {
 
     private void fail(String message) {
         ready = false;
-        main.post(() -> listener.onFailed(message));
+        main.post(() -> {
+            if (wanted) listener.onFailed(message);
+        });
     }
 
     private void setProxy(String rule, Runnable then) {

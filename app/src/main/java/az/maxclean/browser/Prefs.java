@@ -30,8 +30,31 @@ public final class Prefs {
     public static final String ENGINE = "engine";
     public static final String CUSTOM_ENGINE = "custom_engine";
     public static final String USER_BLOCKLIST = "user_blocklist";
+    public static final String BRIDGES = "bridges";
+    public static final String BRIDGE_LINES = "bridge_lines";
+    public static final String PROXY_URL = "proxy_url";
+    public static final String FP_PROTECT = "fp_protect";
+
+    /** Values of {@link #BRIDGES}. */
+    public static final String BRIDGES_NONE = "none";
+    public static final String BRIDGES_SNOWFLAKE = "snowflake";
+    public static final String BRIDGES_OBFS4 = "obfs4";
+    public static final String BRIDGES_CUSTOM = "custom";
 
     private Prefs() {}
+
+    public static String str(Context c, String key, String def) {
+        return get(c).getString(key, def).trim();
+    }
+
+    /**
+     * Everything that decides how traffic leaves the phone. When it changes, Tor or the proxy
+     * has to be set up again.
+     */
+    public static String networkSignature(Context c) {
+        return on(c, TOR) + "|" + str(c, BRIDGES, BRIDGES_NONE) + "|" + str(c, BRIDGE_LINES, "")
+                + "|" + str(c, PROXY_URL, "");
+    }
 
     public static SharedPreferences get(Context c) {
         return c.getSharedPreferences("settings", Context.MODE_PRIVATE);
@@ -43,7 +66,6 @@ public final class Prefs {
 
     public static boolean defaultOn(String key) {
         switch (key) {
-            case TOR:
             case THIRD_PARTY_COOKIES:
             case USER_SCRIPT_ON:
                 return false;
