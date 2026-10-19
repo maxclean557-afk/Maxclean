@@ -92,9 +92,12 @@ public class MainActivity extends Activity {
     private boolean torReady;
     private boolean torFailed;
     private boolean reloadWhenRouted;
+    private String networkSignature;
     private final List<String> pendingLoads = new ArrayList<>();
     private String cosmeticCss = "";
     private String cookieCss = "";
+    private String fingerprintJs = "";
+    private static final long FP_SEED = new java.security.SecureRandom().nextInt() & 0xffffffffL;
 
     // ---------------------------------------------------------------- lifecycle
 
@@ -109,13 +112,39 @@ public class MainActivity extends Activity {
         blocker = new AdBlocker(this);
         cosmeticCss = readAsset("filters/cosmetic.css");
         cookieCss = readAsset("filters/cookie_banners.css");
+        fingerprintJs = readAsset("fingerprint.js");
         buildUi();
         Wiper.wipeShared(this);
 
         tor = new TorProxy(this, torListener);
         torEnabled = Prefs.on(this, Prefs.TOR);
+        networkSignature = Prefs.networkSignature(this);
         applyTor(false);
         newTab(urlFromIntent(getIntent()));
+        warnIfWebViewOutdated();
+    }
+
+    /**
+     * The browser engine is the system WebView, updated by Google Play. An old one has known
+     * security holes, so say so instead of staying silent.
+     */
+    private void warnIfWebViewOutdated() {
+        android.content.pm.PackageInfo p = WebViewCompat.getCurrentWebViewPackage(this);
+        if (p == null || p.versionName == null) return;
+        int major;
+        try {
+            major = Integer.parseInt(p.versionName.split("\\.")[0]);
+        } catch (NumberFormatException e) {
+            return;
+        }
+        // Chromium ships a new major version about every 4 weeks; 130 came out in October 2024.
+        long weeks = (System.currentTimeMillis() - 1728950400000L) / (7L * 24 * 3600 * 1000);
+        int expected = 130 + (int) (weeks / 4);
+        if (major < expected - 12) {
+            container.postDelayed(() -> showBanner("⚠ Движок браузера (Android System WebView " + major
+                    + ") устарел больше чем на год, в нём есть известные уязвимости. "
+                    + "Обновите «Android System WebView» в Google Play.", C_WARN), 4000);
+        }
     }
 
     @Override
@@ -137,9 +166,11 @@ public class MainActivity extends Activity {
         blocker.refresh(this);
         for (Tab t : tabs) configure(t);
         updateEngineButton();
-        boolean wantTor = Prefs.on(this, Prefs.TOR);
-        if (wantTor != torEnabled) {
-            torEnabled = wantTor;
+        String sig = Prefs.networkSignature(this);
+        if (!sig.equals(networkSignature)) {
+            // Tor, bridges or the proxy changed in Settings: set the route up again.
+            networkSignature = sig;
+            torEnabled = Prefs.on(this, Prefs.TOR);
             applyTor(true);
         }
     }
@@ -299,7 +330,6 @@ public class MainActivity extends Activity {
 
     private void onBannerClick() {
         if (torEnabled && !torReady && torFailed) {
-            tor.stop();
             applyTor(true); // retry
             return;
         }
@@ -311,6 +341,7 @@ public class MainActivity extends Activity {
     private void toggleTor() {
         torEnabled = !torEnabled;
         Prefs.get(this).edit().putBoolean(Prefs.TOR, torEnabled).apply();
+        networkSignature = Prefs.networkSignature(this);
         applyTor(true);
     }
 
@@ -318,7 +349,8 @@ public class MainActivity extends Activity {
     private void applyTor(boolean reload) {
         updateTorBadge();
         reloadWhenRouted = reload;
-        torReady = !torEnabled;
+        // With the user's own proxy nothing loads until it is in place either.
+        torReady = !torEnabled && Bridges.proxyUrl(this).isEmpty();
         torFailed = false;
         // Wipe everything made under the other network identity.
         Wiper.wipeShared(this);
@@ -333,9 +365,9 @@ public class MainActivity extends Activity {
         private long startedAt;
 
         @Override
-        public void onStarting() {
+        public void onStarting(String how) {
             startedAt = System.currentTimeMillis();
-            showBanner("🧅 Подключаюсь к сети Tor… обычно 10–40 секунд. "
+            showBanner("🧅 Подключаюсь к сети Tor" + how + "… обычно 10–60 секунд. "
                     + "Пока Tor не готов, ничего не загружается.", C_TOR);
             container.postDelayed(this::slowCheck, 60_000);
         }
@@ -343,8 +375,11 @@ public class MainActivity extends Activity {
         private void slowCheck() {
             if (torEnabled && !torReady && !torFailed
                     && System.currentTimeMillis() - startedAt >= 59_000) {
-                showBanner("🧅 Tor подключается дольше обычного. Возможно, ваша сеть блокирует Tor "
-                        + "или интернет медленный. Продолжаю пытаться…", C_TOR);
+                boolean bridges = !Prefs.BRIDGES_NONE.equals(Prefs.str(MainActivity.this, Prefs.BRIDGES, Prefs.BRIDGES_NONE));
+                showBanner(bridges
+                        ? "🧅 Tor подключается дольше обычного. Попробуйте другой тип мостов в Настройках → Мосты Tor."
+                        : "🧅 Tor подключается дольше обычного. Похоже, ваша сеть блокирует Tor: включите мосты "
+                        + "(Snowflake) в Настройках → Мосты Tor.", C_TOR);
             }
         }
 
@@ -366,11 +401,12 @@ public class MainActivity extends Activity {
         }
 
         @Override
-        public void onOff() {
+        public void onOff(String proxy) {
             if (torEnabled) return;
             torReady = true;
             if (reloadWhenRouted) {
-                showBanner("Tor выключен — прямое соединение", C_PANEL);
+                showBanner(proxy.isEmpty() ? "Tor выключен — прямое соединение"
+                        : "Tor выключен — через ваш прокси " + proxy, C_PANEL);
                 container.postDelayed(() -> { if (!torEnabled) banner.setVisibility(View.GONE); }, 2000);
             } else {
                 banner.setVisibility(View.GONE);
@@ -517,6 +553,11 @@ public class MainActivity extends Activity {
                     + "try{Object.defineProperty(window,k,{value:undefined,writable:false,configurable:false});}catch(e){}});"
                     + "}catch(e){}");
         }
+        if (Prefs.on(this, Prefs.FP_PROTECT) && !fingerprintJs.isEmpty()) {
+            // The function is in assets/fingerprint.js; the seed changes on every start.
+            js.append("try{(").append(fingerprintJs.trim().replaceAll("^(//[^\\n]*\\n)+", ""))
+                    .append(")(").append(FP_SEED).append(");}catch(e){}");
+        }
         if (Prefs.on(this, Prefs.GPC)) {
             js.append("try{Object.defineProperty(navigator,'globalPrivacyControl',{value:true});"
                     + "Object.defineProperty(navigator,'doNotTrack',{value:'1'});}catch(e){}");
@@ -583,6 +624,11 @@ public class MainActivity extends Activity {
             pendingLoads.add(url);
             urlBar.setText(url);
             return;
+        }
+        Uri u = Uri.parse(url);
+        if ("http".equalsIgnoreCase(u.getScheme()) && u.getHost() != null
+                && !u.getHost().endsWith(".onion") && Prefs.on(this, Prefs.HTTPS_ONLY)) {
+            url = u.buildUpon().scheme("https").build().toString();
         }
         current.view.loadUrl(url, privacyHeaders());
     }
@@ -652,6 +698,14 @@ public class MainActivity extends Activity {
         @Override
         public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
             Uri uri = request.getUrl();
+            if (!request.isForMainFrame() && "http".equalsIgnoreCase(uri.getScheme())
+                    && uri.getHost() != null && !uri.getHost().endsWith(".onion")
+                    && Prefs.on(MainActivity.this, Prefs.HTTPS_ONLY)) {
+                // Unencrypted pieces of a page could be read or changed on the way (a Tor exit
+                // node, public Wi-Fi). Only HTTPS, except .onion, which Tor encrypts itself.
+                blocker.countBlocked();
+                return AdBlocker.emptyResponse();
+            }
             if (!blocker.shouldBlock(uri)) return null;
             if (!request.isForMainFrame()) {
                 blocker.countBlocked();

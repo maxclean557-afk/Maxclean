@@ -115,6 +115,8 @@ public class CodeActivity extends Activity {
         List<String> files = new ArrayList<>();
         listAssets("source", files);
         listAssets("filters", files);
+        files.add("fingerprint.js");
+        files.add("bridges.txt");
         for (String f : files) {
             item(items, f.replaceFirst("^source/", ""), C_TEXT, v -> showSource(f));
         }

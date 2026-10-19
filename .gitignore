@@ -12,3 +12,8 @@ local.properties
 
 # Generated at build time from the sources (see bundleSource in app/build.gradle)
 app/src/main/assets/source/
+
+# Release signing key: keep it safe and private, never commit it
+keystore.properties
+*.jks
+*.keystore

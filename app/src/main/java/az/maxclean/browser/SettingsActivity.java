@@ -11,6 +11,8 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -45,6 +47,27 @@ public class SettingsActivity extends Activity {
                 "Tor встроен в Maxclean. Провайдер видит только, что вы используете Tor, но не сайты. "
                         + "Медленнее. Пока Tor подключается — ничего не грузится (защита от утечки).");
 
+        header("🌉 Мосты Tor");
+        hint("Если Tor заблокирован в вашей стране или сети, мосты маскируют подключение к нему.");
+        choice(Prefs.BRIDGES, Prefs.BRIDGES_NONE, new String[][]{
+                {Prefs.BRIDGES_NONE, "Без мостов", "Быстрее всего, если Tor у вас не блокируют"},
+                {Prefs.BRIDGES_SNOWFLAKE, "Snowflake", "Встроенные мосты Tor Project, работают почти везде"},
+                {Prefs.BRIDGES_OBFS4, "obfs4", "Встроенные мосты Tor Project"},
+                {Prefs.BRIDGES_CUSTOM, "Свои мосты", "obfs4, WebTunnel или Snowflake — вставьте строки ниже"},
+        });
+        multiline(Prefs.BRIDGE_LINES, "Свои мосты, по одному в строке",
+                "Получить: bridges.torproject.org или Telegram-бот @GetBridgesBot");
+
+        header("🔀 Свой прокси (xray, sing-box, v2rayNG)");
+        text(Prefs.PROXY_URL, "Адрес прокси",
+                "Например socks5://127.0.0.1:10808. С Tor — Tor пойдёт через этот прокси. "
+                        + "Без Tor — браузер пойдёт через него. Пусто — не используется.", "", false);
+
+        header("🕵 Защита от отпечатка устройства");
+        toggle(Prefs.FP_PROTECT, "Скрывать особенности телефона",
+                "Одинаковые параметры железа, без данных батареи и сети, общий видеочип, "
+                        + "шум в canvas. Снижает слежку по отпечатку, но не убирает её полностью");
+
         header("🛡 Блокировщик рекламы");
         toggle(Prefs.BLOCK_ADS, "Рекламные сети", "Google Ads, Яндекс.Директ, Criteo, Taboola и др.");
         toggle(Prefs.BLOCK_TRACKERS, "Трекеры и аналитика", "Google Analytics, Метрика, Hotjar, отпечатки браузера");
@@ -75,7 +98,9 @@ public class SettingsActivity extends Activity {
 
         TextView note = new TextView(this);
         note.setText("\nMaxclean не имеет аккаунтов, не отправляет статистику и не связывается с "
-                + "разработчиком. Настройки — единственное, что хранится на телефоне.");
+                + "разработчиком. Настройки — единственное, что хранится на телефоне.\n\n"
+                + "Maxclean защищает только себя, это не VPN: другие приложения ходят в сеть напрямую. "
+                + "Чтобы весь телефон шёл через Tor, используйте Orbot в режиме VPN.");
         note.setTextColor(C_MUTED);
         note.setTextSize(13);
         list.addView(note);
@@ -131,6 +156,65 @@ public class SettingsActivity extends Activity {
         row.addView(sw);
         row.setOnClickListener(v -> sw.toggle());
         list.addView(row);
+    }
+
+    private void hint(String s) {
+        TextView h = new TextView(this);
+        h.setText(s);
+        h.setTextColor(C_MUTED);
+        h.setTextSize(13);
+        list.addView(h);
+    }
+
+    /** A single choice among options {value, label, hint}. */
+    private void choice(String key, String def, String[][] options) {
+        RadioGroup group = new RadioGroup(this);
+        String current = prefs.getString(key, def);
+        for (int i = 0; i < options.length; i++) {
+            RadioButton rb = new RadioButton(this);
+            rb.setId(View.generateViewId());
+            rb.setText(options[i][1] + "\n" + options[i][2]);
+            rb.setTextColor(C_TEXT);
+            rb.setTextSize(15);
+            rb.setPadding(dp(8), dp(6), 0, dp(6));
+            String value = options[i][0];
+            group.addView(rb);
+            if (value.equals(current)) rb.setChecked(true);
+            rb.setOnCheckedChangeListener((b, checked) -> {
+                if (checked) prefs.edit().putString(key, value).apply();
+            });
+        }
+        list.addView(group);
+    }
+
+    private void multiline(String key, String label, String hint) {
+        TextView l = new TextView(this);
+        l.setText(label);
+        l.setTextColor(C_TEXT);
+        l.setTextSize(16);
+        l.setPadding(0, dp(8), 0, 0);
+        list.addView(l);
+
+        EditText e = new EditText(this);
+        e.setText(prefs.getString(key, ""));
+        e.setTextColor(C_TEXT);
+        e.setTextSize(12);
+        e.setTypeface(Typeface.MONOSPACE);
+        e.setHint("obfs4 1.2.3.4:443 FINGERPRINT cert=… iat-mode=0");
+        e.setHintTextColor(C_MUTED);
+        e.setMinLines(3);
+        e.setGravity(Gravity.TOP | Gravity.START);
+        e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        e.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void afterTextChanged(android.text.Editable s) {
+                prefs.edit().putString(key, s.toString()).apply();
+            }
+        });
+        list.addView(e);
+        hint(hint);
     }
 
     private void text(String key, String label, String hint, String def, boolean number) {
