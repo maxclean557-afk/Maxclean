@@ -85,6 +85,8 @@ public class CodeActivity extends Activity {
         t.setPadding(dp(16), dp(14), dp(16), dp(14));
         root.addView(t);
         setContentView(root);
+        LinearLayout screen = root;
+        screen.post(() -> Palette.applyFont(this, screen));
         return root;
     }
 

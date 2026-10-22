@@ -43,6 +43,8 @@ public final class Prefs {
     public static final String ACCENT = "accent";
     public static final String ICON = "icon";
     public static final String ANIMATIONS = "animations";
+    public static final String QUICK_LINKS = "quick_links";
+    public static final String ONBOARDED = "onboarded";
     public static final String FAKE_GEO = "fake_geo";
     public static final String FAKE_GEO_CUSTOM = "fake_geo_custom";
 
