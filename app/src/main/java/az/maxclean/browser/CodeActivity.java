@@ -30,11 +30,12 @@ import java.util.List;
  * every page, and their own block list.
  */
 public class CodeActivity extends Activity {
-    private static final int C_BG = Color.parseColor("#0E1116");
-    private static final int C_PANEL = Color.parseColor("#171B22");
-    private static final int C_TEXT = Color.parseColor("#E8ECF1");
-    private static final int C_MUTED = Color.parseColor("#8A94A3");
-    private static final int C_ACCENT = Color.parseColor("#2BD4A4");
+    private Palette pal;
+    private int C_BG;
+    private int C_PANEL;
+    private int C_TEXT;
+    private int C_MUTED;
+    private int C_ACCENT;
 
     private static final String[][] EDITABLE = {
             {Prefs.USER_JS, "✎ Мой скрипт (JavaScript на каждой странице)",
@@ -50,6 +51,9 @@ public class CodeActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        pal = Palette.of(this);
+        pal.applyTo(this);
+        C_BG = pal.bg; C_PANEL = pal.panel; C_TEXT = pal.text; C_MUTED = pal.muted; C_ACCENT = pal.accent;
         super.onCreate(savedInstanceState);
         showIndex();
     }
@@ -232,5 +236,11 @@ public class CodeActivity extends Activity {
         } catch (IOException e) {
             return "Не удалось открыть файл: " + e.getMessage();
         }
+    }
+
+    @Override
+    public void finish() {
+        super.finish();
+        if (Palette.animations(this)) overridePendingTransition(R.anim.mc_return, R.anim.mc_leave);
     }
 }

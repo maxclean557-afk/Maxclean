@@ -59,14 +59,17 @@ import java.util.regex.Pattern;
 public class MainActivity extends Activity {
     private static final String HOME = "maxclean://home";
     private static boolean webViewStartedInProcess;
+    private static boolean splashShown;
+    private android.animation.ObjectAnimator torPulse;
 
-    private static final int C_BG = Color.parseColor("#0E1116");
-    private static final int C_PANEL = Color.parseColor("#171B22");
-    private static final int C_TEXT = Color.parseColor("#E8ECF1");
-    private static final int C_MUTED = Color.parseColor("#8A94A3");
-    private static final int C_ACCENT = Color.parseColor("#2BD4A4");
-    private static final int C_TOR = Color.parseColor("#9B6BFF");
-    private static final int C_WARN = Color.parseColor("#E5484D");
+    private Palette pal;
+    private int C_BG;
+    private int C_PANEL;
+    private int C_TEXT;
+    private int C_MUTED;
+    private int C_ACCENT;
+    private int C_TOR;
+    private int C_WARN;
 
     /** One open tab. Everything it holds lives in memory and dies with it. */
     private static final class Tab {
@@ -103,6 +106,10 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        pal = Palette.of(this);
+        pal.applyTo(this);
+        C_BG = pal.bg; C_PANEL = pal.panel; C_TEXT = pal.text; C_MUTED = pal.muted;
+        C_ACCENT = pal.accent; C_TOR = pal.tor; C_WARN = pal.warn;
         super.onCreate(savedInstanceState);
         if (!webViewStartedInProcess) {
             // Clean up anything left on disk if the app was killed last time.
@@ -248,7 +255,12 @@ public class MainActivity extends Activity {
         // Keep the keyboard from learning what you type.
         urlBar.setImeOptions(EditorInfo.IME_ACTION_GO | EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
         GradientDrawable pill = new GradientDrawable();
-        pill.setColor(C_BG);
+        pill.setColor(pal.field);
+        if (BuildConfig.FULL) {
+            // Full: the field lights up in the accent colour while you type.
+            pill.setStroke(dp(2), Color.TRANSPARENT);
+            urlBar.setOnFocusChangeListener((v, focus) -> pill.setStroke(dp(2), focus ? C_ACCENT : Color.TRANSPARENT));
+        }
         pill.setCornerRadius(dp(20));
         urlBar.setBackground(pill);
         urlBar.setPadding(dp(14), 0, dp(14), 0);
@@ -304,7 +316,15 @@ public class MainActivity extends Activity {
         container = new FrameLayout(this);
         root.addView(container, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
 
-        setContentView(root);
+        if (Palette.animations(this) && !splashShown) {
+            splashShown = true;
+            FrameLayout frame = new FrameLayout(this);
+            frame.addView(root);
+            frame.addView(buildSplash(frame));
+            setContentView(frame);
+        } else {
+            setContentView(root);
+        }
         updateEngineButton();
     }
 
@@ -320,12 +340,95 @@ public class MainActivity extends Activity {
 
     private void updateTorBadge() {
         torBadge.setAlpha(torEnabled ? 1f : 0.35f);
+        pulseTorBadge(torEnabled && !torReady);
+    }
+
+    /** Full: the onion breathes while Tor connects. */
+    private void pulseTorBadge(boolean on) {
+        if (torPulse != null) {
+            torPulse.cancel();
+            torPulse = null;
+            torBadge.setScaleX(1f);
+            torBadge.setScaleY(1f);
+        }
+        if (!on || !Palette.animations(this)) return;
+        torPulse = android.animation.ObjectAnimator.ofPropertyValuesHolder(torBadge,
+                android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.18f),
+                android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.18f));
+        torPulse.setDuration(700);
+        torPulse.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        torPulse.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+        torPulse.start();
     }
 
     private void showBanner(String text, int color) {
+        boolean wasHidden = banner.getVisibility() != View.VISIBLE;
         banner.setText(text);
         banner.setBackgroundColor(color);
+        // Readable on any background: dark text only on the light theme's panel.
+        banner.setTextColor(color == C_PANEL ? C_TEXT : Color.WHITE);
         banner.setVisibility(View.VISIBLE);
+        if (torEnabled && !torReady && color == C_TOR) pulseTorBadge(true);
+        if (!torEnabled || torReady) pulseTorBadge(false);
+        if (wasHidden && Palette.animations(this)) {
+            banner.setAlpha(0f);
+            banner.setTranslationY(-dp(16));
+            banner.animate().alpha(1f).translationY(0).setDuration(260)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+        }
+    }
+
+    private void hideBanner() {
+        if (banner.getVisibility() != View.VISIBLE) return;
+        if (!Palette.animations(this)) {
+            banner.setVisibility(View.GONE);
+            return;
+        }
+        banner.animate().alpha(0f).translationY(-dp(16)).setDuration(200)
+                .withEndAction(() -> {
+                    banner.setVisibility(View.GONE);
+                    banner.setAlpha(1f);
+                    banner.setTranslationY(0);
+                }).start();
+    }
+
+    /** Full: the shield grows in, the name appears, then the whole screen fades into the browser. */
+    private View buildSplash(FrameLayout parent) {
+        LinearLayout splash = new LinearLayout(this);
+        splash.setOrientation(LinearLayout.VERTICAL);
+        splash.setGravity(Gravity.CENTER);
+        splash.setBackgroundColor(C_BG);
+        splash.setClickable(true);
+        android.widget.ImageView logo = new android.widget.ImageView(this);
+        logo.setImageResource(R.drawable.ic_launcher_fg);
+        splash.addView(logo, new LinearLayout.LayoutParams(dp(160), dp(160)));
+        TextView name = new TextView(this);
+        name.setText("Maxclean");
+        name.setTextColor(C_TEXT);
+        name.setTextSize(30);
+        name.setTypeface(Typeface.DEFAULT_BOLD);
+        name.setLetterSpacing(0.04f);
+        splash.addView(name);
+        TextView tag = new TextView(this);
+        tag.setText("анонимность без следов");
+        tag.setTextColor(C_MUTED);
+        tag.setTextSize(14);
+        tag.setPadding(0, dp(6), 0, 0);
+        splash.addView(tag);
+
+        logo.setScaleX(0.4f);
+        logo.setScaleY(0.4f);
+        logo.setAlpha(0f);
+        name.setAlpha(0f);
+        name.setTranslationY(dp(12));
+        tag.setAlpha(0f);
+        logo.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(520)
+                .setInterpolator(new android.view.animation.OvershootInterpolator(1.6f)).start();
+        name.animate().alpha(1f).translationY(0).setStartDelay(260).setDuration(380).start();
+        tag.animate().alpha(1f).setStartDelay(420).setDuration(380).start();
+        splash.animate().alpha(0f).scaleX(1.06f).scaleY(1.06f).setStartDelay(1150).setDuration(380)
+                .withEndAction(() -> parent.removeView(splash)).start();
+        return splash;
     }
 
     private void onBannerClick() {
@@ -333,7 +436,7 @@ public class MainActivity extends Activity {
             applyTor(true); // retry
             return;
         }
-        if (torReady || !torEnabled) banner.setVisibility(View.GONE);
+        if (torReady || !torEnabled) hideBanner();
     }
 
     // ---------------------------------------------------------------- Tor
@@ -350,7 +453,7 @@ public class MainActivity extends Activity {
         updateTorBadge();
         reloadWhenRouted = reload;
         // With the user's own proxy nothing loads until it is in place either.
-        torReady = !torEnabled && Bridges.proxyUrl(this).isEmpty();
+        torReady = !torEnabled && !Bridges.anyProxy(this);
         torFailed = false;
         // Wipe everything made under the other network identity.
         Wiper.wipeShared(this);
@@ -388,7 +491,7 @@ public class MainActivity extends Activity {
             torReady = true;
             torFailed = false;
             showBanner("🧅 Tor подключён: провайдер не видит, куда вы ходите", C_TOR);
-            container.postDelayed(() -> { if (torReady) banner.setVisibility(View.GONE); }, 2500);
+            container.postDelayed(() -> { if (torReady) hideBanner(); }, 2500);
             afterRouteChange();
         }
 
@@ -407,9 +510,9 @@ public class MainActivity extends Activity {
             if (reloadWhenRouted) {
                 showBanner(proxy.isEmpty() ? "Tor выключен — прямое соединение"
                         : "Tor выключен — через ваш прокси " + proxy, C_PANEL);
-                container.postDelayed(() -> { if (!torEnabled) banner.setVisibility(View.GONE); }, 2000);
+                container.postDelayed(() -> { if (!torEnabled) hideBanner(); }, 2000);
             } else {
-                banner.setVisibility(View.GONE);
+                hideBanner();
             }
             afterRouteChange();
         }
@@ -449,10 +552,20 @@ public class MainActivity extends Activity {
     }
 
     private void switchTo(Tab t) {
+        boolean animate = current != t && Palette.animations(this);
         current = t;
         container.removeAllViews();
         container.addView(t.view, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        if (animate) {
+            // Full: the tab rises in from slightly smaller, like a card being picked up.
+            t.view.setAlpha(0f);
+            t.view.setScaleX(0.96f);
+            t.view.setScaleY(0.96f);
+            t.view.setTranslationY(dp(18));
+            t.view.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0).setDuration(280)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
+        }
         showUrl(t.view.getUrl());
     }
 
@@ -556,8 +669,10 @@ public class MainActivity extends Activity {
         if (Prefs.on(this, Prefs.FP_PROTECT) && !fingerprintJs.isEmpty()) {
             // The function is in assets/fingerprint.js; the seed changes on every start.
             js.append("try{(").append(fingerprintJs.trim().replaceAll("^(//[^\\n]*\\n)+", ""))
-                    .append(")(").append(FP_SEED).append(");}catch(e){}");
+                    .append(")(").append(FP_SEED).append(",").append(Disguise.profileJs(this))
+                    .append(");}catch(e){}");
         }
+        js.append(Disguise.geoJs(this));
         if (Prefs.on(this, Prefs.GPC)) {
             js.append("try{Object.defineProperty(navigator,'globalPrivacyControl',{value:true});"
                     + "Object.defineProperty(navigator,'doNotTrack',{value:'1'});}catch(e){}");
@@ -672,17 +787,36 @@ public class MainActivity extends Activity {
     }
 
     private String homeHtml() {
+        String bg = Palette.hex(C_BG), text = Palette.hex(C_TEXT), muted = Palette.hex(C_MUTED);
+        String accent = Palette.hex(C_ACCENT), tor = Palette.hex(C_TOR), panel = Palette.hex(C_PANEL);
         String mode = torEnabled
-                ? "<span style='color:#9B6BFF'>🧅 Tor включён — провайдер не видит, куда вы ходите</span>"
-                : "<span style='color:#8A94A3'>Tor выключен — нажмите 🧅 вверху, чтобы включить</span>";
+                ? "<span style='color:" + tor + "'>🧅 Tor включён — провайдер не видит, куда вы ходите</span>"
+                : "<span style='color:" + muted + "'>Tor выключен — нажмите 🧅 вверху, чтобы включить</span>";
+        // Full: the start page rises in piece by piece and the shield breathes.
+        String motion = Palette.animations(this)
+                ? ".in{opacity:0;transform:translateY(14px);animation:up .7s cubic-bezier(.2,.8,.2,1) forwards}"
+                + ".d1{animation-delay:.08s}.d2{animation-delay:.18s}.d3{animation-delay:.28s}.d4{animation-delay:.38s}"
+                + "@keyframes up{to{opacity:1;transform:none}}"
+                + ".logo{animation:breathe 3.2s ease-in-out infinite}"
+                + "@keyframes breathe{50%{transform:scale(1.04)}}"
+                + "@media (prefers-reduced-motion:reduce){.in,.logo{animation:none;opacity:1;transform:none}}"
+                : "";
+        String card = BuildConfig.FULL
+                ? "ul{background:" + panel + ";border-radius:18px;padding:14px 22px;box-shadow:0 8px 30px rgba(0,0,0,.18)}"
+                : "";
         return "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
-                + "<style>body{background:#0E1116;color:#E8ECF1;font-family:sans-serif;margin:0;"
+                + "<style>body{background:" + bg + ";color:" + text + ";font-family:sans-serif;margin:0;"
                 + "display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:90vh;"
                 + "text-align:center;padding:0 24px}h1{font-size:40px;margin:0 0 4px;letter-spacing:1px}"
-                + "h1 b{color:#2BD4A4}p{color:#8A94A3;line-height:1.5;margin:6px 0}"
-                + "ul{list-style:none;padding:0;color:#8A94A3;font-size:14px;line-height:1.9}</style></head><body>"
-                + "<h1><b>Max</b>clean</h1><p>Ничего не сохраняется. Ни аккаунтов, ни истории, ни следов.</p>"
-                + "<p>" + mode + "</p><ul>"
+                + "h1 b{color:" + accent + "}p{color:" + muted + ";line-height:1.5;margin:6px 0}"
+                + "ul{list-style:none;padding:0;color:" + muted + ";font-size:14px;line-height:1.9}"
+                + card + motion + "</style></head><body>"
+                + (BuildConfig.FULL ? "<svg class='logo in' width='84' height='84' viewBox='0 0 108 108'>"
+                + "<path d='M54,22 L78,31 L78,51 C78,68 67,80 54,85 C41,80 30,68 30,51 L30,31 Z' fill='" + accent + "'/>"
+                + "<path d='M42,64 L42,42 L47,42 L54,53 L61,42 L66,42 L66,64 L61,64 L61,51 L54,61 L47,51 L47,64 Z' fill='"
+                + bg + "'/></svg>" : "")
+                + "<h1 class='in d1'><b>Max</b>clean</h1><p class='in d2'>Ничего не сохраняется. Ни аккаунтов, ни истории, ни следов.</p>"
+                + "<p class='in d3'>" + mode + "</p><ul class='in d4'>"
                 + "<li>🍪 Cookies живут только пока открыта вкладка</li>"
                 + "<li>🛡 Реклама и трекеры блокируются</li>"
                 + "<li>🧹 Закрыли вкладку — всё стёрто</li></ul></body></html>";
@@ -712,7 +846,7 @@ public class MainActivity extends Activity {
                 return AdBlocker.emptyResponse();
             }
             // A whole page on a tracker domain (e.g. an ad click redirect).
-            String page = "<html><body style='background:#0E1116;color:#E8ECF1;font-family:sans-serif;padding:24px'>"
+            String page = "<html><body style='background:" + Palette.hex(C_BG) + ";color:" + Palette.hex(C_TEXT) + ";font-family:sans-serif;padding:24px'>"
                     + "<h3>Maxclean заблокировал этот адрес</h3><p>" + uri.getHost()
                     + " — рекламный или следящий домен. Отключить можно в Настройках.</p></body></html>";
             return new WebResourceResponse("text/html", "utf-8",
@@ -766,7 +900,7 @@ public class MainActivity extends Activity {
         @Override
         public void onProgressChanged(WebView view, int p) {
             if (tab != current) return;
-            progress.setProgress(p);
+            progress.setProgress(p, Palette.animations(MainActivity.this));
             progress.setVisibility(p >= 100 ? View.GONE : View.VISIBLE);
         }
 
@@ -825,6 +959,7 @@ public class MainActivity extends Activity {
         m.getMenu().add(0, 6, 0, "🔎 Поисковик…");
         m.getMenu().add(0, 7, 0, "⚙ Настройки");
         m.getMenu().add(0, 8, 0, "</> Код браузера");
+        m.getMenu().add(0, 10, 0, "🔍 Проверка утечек");
         m.getMenu().add(0, 9, 0, "🔥 Стереть всё и выйти");
         m.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
@@ -834,13 +969,19 @@ public class MainActivity extends Activity {
                 case 4: if (current.view.canGoForward()) current.view.goForward(); break;
                 case 5: toggleTor(); break;
                 case 6: chooseEngine(); break;
-                case 7: startActivity(new Intent(this, SettingsActivity.class)); break;
-                case 8: startActivity(new Intent(this, CodeActivity.class)); break;
+                case 7: openScreen(SettingsActivity.class); break;
+                case 8: openScreen(CodeActivity.class); break;
                 case 9: wipeAndExit(); break;
+                case 10: showLeakTests(); break;
             }
             return true;
         });
         m.show();
+    }
+
+    private void openScreen(Class<?> screen) {
+        startActivity(new Intent(this, screen));
+        if (Palette.animations(this)) overridePendingTransition(R.anim.mc_enter, R.anim.mc_hold);
     }
 
     private void chooseEngine() {
@@ -859,6 +1000,22 @@ public class MainActivity extends Activity {
                     String text = urlBar.getText().toString().trim();
                     if (!text.isEmpty() && !text.contains("://")) submit(text);
                 })
+                .show();
+    }
+
+    /** Independent sites that show what a page can see: your IP, DNS servers, fingerprint. */
+    private void showLeakTests() {
+        String[][] tests = {
+                {"Tor и IP-адрес", "https://check.torproject.org/"},
+                {"DNS-утечки", "https://www.dnsleaktest.com/"},
+                {"IP, WebRTC и DNS вместе", "https://browserleaks.com/ip"},
+                {"Отпечаток браузера", "https://coveryourtracks.eff.org/"},
+        };
+        String[] names = new String[tests.length];
+        for (int i = 0; i < tests.length; i++) names[i] = tests[i][0];
+        new AlertDialog.Builder(this)
+                .setTitle("Что видят сайты? Через Tor там будет не ваш адрес")
+                .setItems(names, (d, which) -> newTab(tests[which][1]))
                 .show();
     }
 

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Full: back to the screen underneath. -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:interpolator="@android:interpolator/decelerate_cubic" android:duration="260">
+    <scale android:fromXScale="0.96" android:toXScale="1" android:fromYScale="0.96" android:toYScale="1"
+        android:pivotX="50%" android:pivotY="50%" />
+    <alpha android:fromAlpha="0.6" android:toAlpha="1" />
+</set>

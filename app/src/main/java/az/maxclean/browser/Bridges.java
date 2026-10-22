@@ -74,20 +74,24 @@ public final class Bridges {
         return rc.toString();
     }
 
-    /**
-     * Normalizes the user's proxy address to "socks5://host:port" or "http://host:port", or
-     * returns "" if it is not usable.
-     */
-    public static String proxyUrl(Context c) {
-        String raw = Prefs.str(c, Prefs.PROXY_URL, "");
-        if (raw.isEmpty()) return "";
-        if (!raw.contains("://")) raw = "socks5://" + raw;
-        Uri u = Uri.parse(raw);
-        String scheme = u.getScheme() == null ? "" : u.getScheme().toLowerCase();
-        if (scheme.equals("socks") || scheme.equals("socks5h")) scheme = "socks5";
-        if (!(scheme.equals("socks5") || scheme.equals("http") || scheme.equals("https"))) return "";
-        if (u.getHost() == null || u.getPort() <= 0) return "";
-        return scheme + "://" + u.getHost() + ":" + u.getPort();
+    /** The user's proxy chain in front of Tor (or the browser), at most {@link ProxyChain#MAX_HOPS}. */
+    public static List<ProxyChain.Hop> chainBefore(Context c) {
+        List<ProxyChain.Hop> hops = new ArrayList<>();
+        for (String line : Prefs.str(c, Prefs.PROXY_URL, "").split("\n")) {
+            ProxyChain.Hop h = ProxyChain.parse(line);
+            if (h != null && hops.size() < ProxyChain.MAX_HOPS) hops.add(h);
+        }
+        return hops;
+    }
+
+    /** The proxy after Tor, or null. */
+    public static ProxyChain.Hop proxyAfter(Context c) {
+        return ProxyChain.parse(Prefs.str(c, Prefs.PROXY_AFTER, ""));
+    }
+
+    /** True when any proxy is set, so the browser must wait for it before loading anything. */
+    public static boolean anyProxy(Context c) {
+        return !chainBefore(c).isEmpty() || proxyAfter(c) != null;
     }
 
     private static String clean(String line) {

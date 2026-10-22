@@ -21,6 +21,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,6 +67,8 @@ public final class TorProxy {
     private int generation;
     private Controller transports;
     private Set<String> running;
+    /** Chain in front of Tor, and the one the browser uses (Tor plus the proxy after it). */
+    private ProxyChain chainIn, chainOut;
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override
@@ -140,18 +143,26 @@ public final class TorProxy {
             return;
         }
         List<String> bridges = Bridges.lines(app);
-        String proxy = Bridges.proxyUrl(app);
+        List<ProxyChain.Hop> before = Bridges.chainBefore(app);
+        ProxyChain.Hop after = Bridges.proxyAfter(app);
         if (Prefs.BRIDGES_CUSTOM.equals(Prefs.str(app, Prefs.BRIDGES, "")) && bridges.isEmpty()) {
             fail("Вы выбрали свои мосты, но не вставили ни одного. Добавьте их в Настройках.");
             return;
         }
         Set<String> needed = Bridges.transports(bridges);
         String how = bridges.isEmpty() ? "" : " через мосты (" + String.join(", ", needed) + ")";
-        if (!proxy.isEmpty()) how += " через ваш прокси";
+        if (!before.isEmpty()) how += " через " + hops(before.size()) + " перед ним";
+        if (after != null) how += ", с прокси после него";
         listener.onStarting(how);
         // Close the door first, then start Tor.
         setProxy(BLACKHOLE, () -> new Thread(() -> {
             try {
+                // Tor takes one upstream proxy: a local chain server stands in for the whole chain.
+                String proxy = "";
+                if (!before.isEmpty()) {
+                    chainIn = new ProxyChain(before);
+                    proxy = "socks5://127.0.0.1:" + chainIn.start();
+                }
                 Map<String, Long> ports = startTransports(needed, proxy);
                 writeTorrc(Bridges.torrc(bridges, ports, proxy));
             } catch (Exception e) {
@@ -171,17 +182,41 @@ public final class TorProxy {
         wanted = false;
         ready = false;
         generation++;
-        String proxy = Bridges.proxyUrl(app);
         if (!isSupported()) {
             listener.onOff("");
             return;
         }
-        if (proxy.isEmpty()) {
+        List<ProxyChain.Hop> hops = new ArrayList<>(Bridges.chainBefore(app));
+        ProxyChain.Hop after = Bridges.proxyAfter(app);
+        if (after != null) hops.add(after);
+        if (hops.isEmpty()) {
             ProxyController.getInstance().clearProxyOverride(onMain, () -> listener.onOff(""));
-        } else {
-            // Without Tor, but through the user's own proxy (xray, sing-box…).
-            setProxy(proxy, () -> listener.onOff(proxy));
+            return;
         }
+        // Without Tor, but through the user's own proxies (xray, sing-box…). Until the chain is
+        // up the blackhole stays, so nothing goes out directly.
+        String label = hops.size() == 1 ? hops.get(0).toString() : hops(hops.size());
+        setProxy(BLACKHOLE, () -> new Thread(() -> {
+            try {
+                ProxyChain c = new ProxyChain(hops);
+                int port = c.start();
+                main.post(() -> {
+                    if (wanted) {
+                        c.stop();
+                        return;
+                    }
+                    chainOut = c;
+                    setProxy("socks5://127.0.0.1:" + port, () -> listener.onOff(label));
+                });
+            } catch (Exception e) {
+                // The blackhole stays: better no internet than a direct connection.
+                main.post(() -> listener.onOff("(прокси не запустился: " + e.getMessage() + ")"));
+            }
+        }).start());
+    }
+
+    private static String hops(int n) {
+        return n + (n == 1 ? " прокси" : " прокси подряд");
     }
 
     public void release() {
@@ -190,6 +225,10 @@ public final class TorProxy {
     }
 
     private void shutdown() {
+        if (chainIn != null) chainIn.stop();
+        if (chainOut != null) chainOut.stop();
+        chainIn = null;
+        chainOut = null;
         if (bound) {
             app.unbindService(connection);
             bound = false;
@@ -251,12 +290,39 @@ public final class TorProxy {
     }
 
     private void route(int port) {
-        // socks5 makes Chromium send host names to Tor: DNS goes through Tor and .onion works.
-        setProxy("socks5://127.0.0.1:" + port, () -> {
-            if (!wanted) return;
-            ready = true;
-            listener.onReady(port);
-        });
+        ProxyChain.Hop after = Bridges.proxyAfter(app);
+        if (after == null) {
+            // socks5 makes Chromium send host names to Tor: DNS goes through Tor and .onion works.
+            setProxy("socks5://127.0.0.1:" + port, () -> {
+                if (!wanted) return;
+                ready = true;
+                listener.onReady(port);
+            });
+            return;
+        }
+        // Browser → Tor → the user's proxy → site, for sites that refuse Tor exits.
+        int gen = generation;
+        new Thread(() -> {
+            try {
+                ProxyChain c = new ProxyChain(java.util.Arrays.asList(
+                        ProxyChain.parse("socks5://127.0.0.1:" + port), after));
+                int local = c.start();
+                main.post(() -> {
+                    if (!wanted || gen != generation) {
+                        c.stop();
+                        return;
+                    }
+                    chainOut = c;
+                    setProxy("socks5://127.0.0.1:" + local, () -> {
+                        if (!wanted) return;
+                        ready = true;
+                        listener.onReady(port);
+                    });
+                });
+            } catch (Exception e) {
+                fail("Не удалось запустить прокси после Tor: " + e.getMessage());
+            }
+        }).start();
     }
 
     private void fail(String message) {
