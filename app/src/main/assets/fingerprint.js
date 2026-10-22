@@ -2,20 +2,39 @@
 // It makes this phone look like many others (fixed hardware values, no battery or network
 // details, generic graphics chip) and adds tiny random noise to canvas reads, so sites cannot
 // recognise the same device across visits. It lowers fingerprinting; it cannot remove it.
-// `seed` is new every time Maxclean starts.
-function (seed) {
+// `seed` is new every time Maxclean starts. `profile` is null (the common values below) or a
+// whole set of values from a real phone, chosen in Settings: {model, android, w, h, dpr, cores, mem}.
+function (seed, profile) {
   var def = function (obj, key, value) {
     try {
       Object.defineProperty(obj, key, { get: function () { return value; }, configurable: true });
     } catch (e) {}
   };
 
-  // Hardware: the same answer on every phone.
-  def(Navigator.prototype, 'hardwareConcurrency', 4);
-  def(Navigator.prototype, 'deviceMemory', 4);
+  // Hardware: the same answer on every phone, or the chosen phone's.
+  def(Navigator.prototype, 'hardwareConcurrency', profile ? profile.cores : 4);
+  def(Navigator.prototype, 'deviceMemory', profile ? profile.mem : 4);
   def(Navigator.prototype, 'maxTouchPoints', 5);
   def(Screen.prototype, 'colorDepth', 24);
   def(Screen.prototype, 'pixelDepth', 24);
+  if (profile) {
+    def(Screen.prototype, 'width', profile.w);
+    def(Screen.prototype, 'height', profile.h);
+    def(Screen.prototype, 'availWidth', profile.w);
+    def(Screen.prototype, 'availHeight', profile.h);
+    def(window, 'devicePixelRatio', profile.dpr);
+  }
+  // Detailed browser hints that sites can ask for: no real model, or the chosen one.
+  if (window.NavigatorUAData && NavigatorUAData.prototype.getHighEntropyValues) {
+    var high = NavigatorUAData.prototype.getHighEntropyValues;
+    NavigatorUAData.prototype.getHighEntropyValues = function (hints) {
+      return high.call(this, hints).then(function (v) {
+        v.model = profile ? profile.model : '';
+        if (profile && 'platformVersion' in v) v.platformVersion = profile.android;
+        return v;
+      });
+    };
+  }
 
   // APIs that tell sites about the battery and the network.
   def(Navigator.prototype, 'getBattery', undefined);

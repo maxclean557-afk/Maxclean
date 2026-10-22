@@ -32,8 +32,19 @@ public final class Prefs {
     public static final String USER_BLOCKLIST = "user_blocklist";
     public static final String BRIDGES = "bridges";
     public static final String BRIDGE_LINES = "bridge_lines";
+    /** The proxy chain before Tor (or for the browser without Tor): one address per line. */
     public static final String PROXY_URL = "proxy_url";
+    /** One proxy after Tor, for sites that block Tor. */
+    public static final String PROXY_AFTER = "proxy_after";
     public static final String FP_PROTECT = "fp_protect";
+    public static final String DEVICE_PROFILE = "device_profile";
+    // Full edition: look and feel
+    public static final String THEME = "theme";
+    public static final String ACCENT = "accent";
+    public static final String ICON = "icon";
+    public static final String ANIMATIONS = "animations";
+    public static final String FAKE_GEO = "fake_geo";
+    public static final String FAKE_GEO_CUSTOM = "fake_geo_custom";
 
     /** Values of {@link #BRIDGES}. */
     public static final String BRIDGES_NONE = "none";
@@ -53,7 +64,7 @@ public final class Prefs {
      */
     public static String networkSignature(Context c) {
         return on(c, TOR) + "|" + str(c, BRIDGES, BRIDGES_NONE) + "|" + str(c, BRIDGE_LINES, "")
-                + "|" + str(c, PROXY_URL, "");
+                + "|" + str(c, PROXY_URL, "") + "|" + str(c, PROXY_AFTER, "");
     }
 
     public static SharedPreferences get(Context c) {

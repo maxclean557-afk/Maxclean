@@ -20,8 +20,27 @@ android {
         applicationId 'az.maxclean.browser'
         minSdk 26
         targetSdk 34
-        versionCode 3
-        versionName '1.2'
+        versionCode 4
+        versionName '1.3'
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    // Two editions from one code base, signed with the same key, so either installs over the other.
+    // Lite keeps the plain interface; Full adds themes, accent colours, alternative icons and animations.
+    flavorDimensions 'edition'
+    productFlavors {
+        lite {
+            dimension 'edition'
+            buildConfigField 'boolean', 'FULL', 'false'
+        }
+        full {
+            dimension 'edition'
+            versionNameSuffix ' Full'
+            buildConfigField 'boolean', 'FULL', 'true'
+        }
     }
 
     signingConfigs {

@@ -50,20 +50,24 @@ jobs:
           MAXCLEAN_KEY_PASSWORD: ${{ secrets.MAXCLEAN_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleLiteRelease assembleFullRelease --no-daemon
 
       - name: SHA-256 and signing certificate
         run: |
-          cp app/build/outputs/apk/release/app-release.apk Maxclean.apk
-          sha256sum Maxclean.apk | tee Maxclean.apk.sha256
-          "$ANDROID_HOME"/build-tools/34.0.0/apksigner verify --print-certs Maxclean.apk | grep -E "SHA-256|DN"
+          cp app/build/outputs/apk/lite/release/app-lite-release.apk Maxclean.apk
+          cp app/build/outputs/apk/full/release/app-full-release.apk Maxclean-Full.apk
+          sha256sum Maxclean.apk Maxclean-Full.apk | tee SHA256SUMS.txt
+          for f in Maxclean.apk Maxclean-Full.apk; do
+            "$ANDROID_HOME"/build-tools/34.0.0/apksigner verify --print-certs "$f" | grep -E "SHA-256|DN"
+          done
 
       - uses: actions/upload-artifact@v5
         with:
           name: Maxclean-apk
           path: |
             Maxclean.apk
-            Maxclean.apk.sha256
+            Maxclean-Full.apk
+            SHA256SUMS.txt
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -71,4 +75,5 @@ jobs:
         with:
           files: |
             Maxclean.apk
-            Maxclean.apk.sha256
+            Maxclean-Full.apk
+            SHA256SUMS.txt
