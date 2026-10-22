@@ -84,6 +84,33 @@ public final class Palette {
         w.getDecorView().setSystemUiVisibility(flags);
     }
 
+    private static android.graphics.Typeface regular, bold;
+
+    /** Full: sets the Manrope font on every text in a view tree (bold text gets the bold weight). */
+    public static void applyFont(Context c, View v) {
+        if (!BuildConfig.FULL) return;
+        if (regular == null) {
+            try {
+                regular = new android.graphics.Typeface.Builder(c.getAssets(), "fonts/Manrope.ttf")
+                        .setFontVariationSettings("'wght' 500").build();
+                bold = new android.graphics.Typeface.Builder(c.getAssets(), "fonts/Manrope.ttf")
+                        .setFontVariationSettings("'wght' 750").build();
+            } catch (RuntimeException e) {
+                return; // keep the system font
+            }
+            if (regular == null || bold == null) return;
+        }
+        if (v instanceof android.widget.TextView) {
+            android.widget.TextView t = (android.widget.TextView) v;
+            android.graphics.Typeface cur = t.getTypeface();
+            t.setTypeface(cur != null && cur.isBold() ? bold : regular);
+        }
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) applyFont(c, g.getChildAt(i));
+        }
+    }
+
     public static String hex(int color) {
         return String.format("#%06X", 0xFFFFFF & color);
     }

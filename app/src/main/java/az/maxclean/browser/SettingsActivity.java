@@ -44,6 +44,7 @@ public class SettingsActivity extends Activity {
         scroll.addView(list);
         scroll.setBackgroundColor(pal.bg);
         setContentView(scroll);
+        scroll.post(() -> Palette.applyFont(this, scroll));
 
         title(BuildConfig.FULL ? "Настройки Maxclean Full" : "Настройки Maxclean");
 
@@ -64,6 +65,10 @@ public class SettingsActivity extends Activity {
             }
             choice(Prefs.ICON, "classic", icons, v -> Icons.apply(this, v));
             toggle(Prefs.ANIMATIONS, "Анимации", "Заставка, плавные вкладки, меню и баннеры");
+            header("⭐ Плитки на стартовой странице");
+            multilineDefault(Prefs.QUICK_LINKS, QuickLinks.DEFAULT, "Свои сайты, по одному в строке: Название | адрес",
+                    "До 8 плиток. Это единственное, что браузер хранит о сайтах, и только потому, что вы сами их вписали.",
+                    "Новости | https://example.com");
         } else {
             hint("Хотите темы, цвета, иконки и анимации? Скачайте Maxclean Full со страницы релизов "
                     + "на GitHub: она ставится поверх этой версии, настройки сохранятся.");
@@ -248,6 +253,10 @@ public class SettingsActivity extends Activity {
     }
 
     private void multiline(String key, String label, String hint, String example) {
+        multilineDefault(key, "", label, hint, example);
+    }
+
+    private void multilineDefault(String key, String def, String label, String hint, String example) {
         TextView l = new TextView(this);
         l.setText(label);
         l.setTextColor(C_TEXT);
@@ -256,7 +265,7 @@ public class SettingsActivity extends Activity {
         list.addView(l);
 
         EditText e = new EditText(this);
-        e.setText(prefs.getString(key, ""));
+        e.setText(prefs.getString(key, def));
         e.setTextColor(C_TEXT);
         e.setTextSize(12);
         e.setTypeface(Typeface.MONOSPACE);

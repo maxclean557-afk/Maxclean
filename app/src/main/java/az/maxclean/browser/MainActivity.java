@@ -60,6 +60,7 @@ public class MainActivity extends Activity {
     private static final String HOME = "maxclean://home";
     private static boolean webViewStartedInProcess;
     private static boolean splashShown;
+    private FrameLayout appFrame;
     private android.animation.ObjectAnimator torPulse;
 
     private Palette pal;
@@ -75,6 +76,8 @@ public class MainActivity extends Activity {
     private static final class Tab {
         WebView view;
         String title = "Новая вкладка";
+        /** Small picture for the Full tab cards, in memory only. */
+        Bitmap thumb;
         final List<ScriptHandler> scripts = new ArrayList<>();
     }
 
@@ -184,6 +187,10 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (closeOverlay != null) {
+            closeOverlay.run();
+            return;
+        }
         if (current != null && current.view.canGoBack()) {
             current.view.goBack();
         } else if (tabs.size() > 1) {
@@ -316,16 +323,478 @@ public class MainActivity extends Activity {
         container = new FrameLayout(this);
         root.addView(container, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
 
+        View content = BuildConfig.FULL ? fullLayout(root, bar) : root;
+        appFrame = new FrameLayout(this);
+        appFrame.addView(content);
         if (Palette.animations(this) && !splashShown) {
             splashShown = true;
-            FrameLayout frame = new FrameLayout(this);
-            frame.addView(root);
-            frame.addView(buildSplash(frame));
-            setContentView(frame);
-        } else {
-            setContentView(root);
+            appFrame.addView(buildSplash(appFrame));
+        }
+        setContentView(appFrame);
+        Palette.applyFont(this, appFrame);
+        if (BuildConfig.FULL && !Prefs.get(this).getBoolean(Prefs.ONBOARDED, false)) {
+            appFrame.postDelayed(this::showIntro, Palette.animations(this) ? 1500 : 0);
         }
         updateEngineButton();
+    }
+
+    // ---------------------------------------------------------------- Full edition interface
+
+    /** The open sheet or overlay, closed by Back. */
+    private Runnable closeOverlay;
+
+    private GradientDrawable rounded(int color, float radius) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(color);
+        d.setCornerRadius(radius);
+        return d;
+    }
+
+    private int fieldColor() {
+        return pal.field;
+    }
+
+    /**
+     * Shows a panel over a dimmed page. Bottom panels slide up with a little spring; the
+     * returned action slides it away again.
+     */
+    private Runnable overlay(View panel, boolean fullHeight) {
+        FrameLayout layer = new FrameLayout(this);
+        View scrim = new View(this);
+        scrim.setBackgroundColor(0x99000000);
+        layer.addView(scrim, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                fullHeight ? ViewGroup.LayoutParams.MATCH_PARENT : ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
+        if (fullHeight) lp.topMargin = dp(48);
+        layer.addView(panel, lp);
+        Palette.applyFont(this, layer);
+        appFrame.addView(layer);
+        boolean anim = Palette.animations(this);
+        Runnable[] close = new Runnable[1];
+        close[0] = () -> {
+            if (closeOverlay == close[0]) closeOverlay = null;
+            if (!anim) {
+                appFrame.removeView(layer);
+                return;
+            }
+            scrim.animate().alpha(0f).setDuration(200).start();
+            panel.animate().translationY(panel.getHeight()).setDuration(220)
+                    .setInterpolator(new android.view.animation.AccelerateInterpolator())
+                    .withEndAction(() -> appFrame.removeView(layer)).start();
+        };
+        scrim.setOnClickListener(v -> close[0].run());
+        closeOverlay = close[0];
+        if (anim) {
+            scrim.setAlpha(0f);
+            scrim.animate().alpha(1f).setDuration(220).start();
+            panel.setVisibility(View.INVISIBLE);
+            panel.post(() -> {
+                panel.setTranslationY(panel.getHeight());
+                panel.setVisibility(View.VISIBLE);
+                panel.animate().translationY(0).setDuration(380)
+                        .setInterpolator(new android.view.animation.OvershootInterpolator(0.9f)).start();
+            });
+        }
+        return close[0];
+    }
+
+    private LinearLayout sheetPanel() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(C_PANEL);
+        float r = dp(28);
+        bg.setCornerRadii(new float[]{r, r, r, r, 0, 0, 0, 0});
+        panel.setBackground(bg);
+        panel.setClickable(true);
+        panel.setPadding(dp(18), dp(10), dp(18), dp(22));
+        View handle = new View(this);
+        handle.setBackground(rounded(C_MUTED, dp(3)));
+        handle.setAlpha(0.5f);
+        LinearLayout.LayoutParams hl = new LinearLayout.LayoutParams(dp(40), dp(5));
+        hl.gravity = Gravity.CENTER_HORIZONTAL;
+        hl.bottomMargin = dp(16);
+        panel.addView(handle, hl);
+        return panel;
+    }
+
+    /** Full: the menu as a sheet: four big actions on top, the rest as a list. */
+    private void showSheetMenu() {
+        LinearLayout panel = sheetPanel();
+        Runnable[] close = new Runnable[1];
+
+        LinearLayout tiles = new LinearLayout(this);
+        tiles.setOrientation(LinearLayout.HORIZONTAL);
+        Object[][] big = {
+                {"＋", "Вкладка", (Runnable) () -> newTab(null), false},
+                {"🧅", torEnabled ? "Tor вкл" : "Tor выкл", (Runnable) this::toggleTor, torEnabled},
+                {"🔎", "Поиск", (Runnable) this::chooseEngine, false},
+                {"🔥", "Стереть", (Runnable) this::wipeAndExit, false},
+        };
+        for (Object[] b : big) {
+            LinearLayout tile = new LinearLayout(this);
+            tile.setOrientation(LinearLayout.VERTICAL);
+            tile.setGravity(Gravity.CENTER);
+            boolean active = (Boolean) b[3];
+            tile.setBackground(rounded(active ? C_ACCENT : fieldColor(), dp(20)));
+            tile.setPadding(0, dp(14), 0, dp(12));
+            TextView icon = new TextView(this);
+            icon.setText((String) b[0]);
+            icon.setTextSize(24);
+            icon.setTextColor(active ? pal.onAccent : C_TEXT);
+            icon.setGravity(Gravity.CENTER);
+            TextView label = new TextView(this);
+            label.setText((String) b[1]);
+            label.setTextSize(12);
+            label.setTypeface(Typeface.DEFAULT_BOLD);
+            label.setTextColor(active ? pal.onAccent : C_TEXT);
+            label.setGravity(Gravity.CENTER);
+            label.setPadding(0, dp(6), 0, 0);
+            tile.addView(icon);
+            tile.addView(label);
+            Runnable action = (Runnable) b[2];
+            tile.setOnClickListener(v -> {
+                v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+                close[0].run();
+                action.run();
+            });
+            LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+            tl.setMargins(dp(5), 0, dp(5), 0);
+            tiles.addView(tile, tl);
+        }
+        panel.addView(tiles);
+
+        Object[][] rows = {
+                {"↻   Обновить", (Runnable) this::reloadCurrent},
+                {"→   Вперёд", (Runnable) () -> { if (current.view.canGoForward()) current.view.goForward(); }},
+                {"✕   Закрыть вкладку (стереть)", (Runnable) () -> closeTab(current)},
+                {"🔍  Проверка утечек", (Runnable) this::showLeakTests},
+                {"⚙   Настройки", (Runnable) () -> openScreen(SettingsActivity.class)},
+                {"</>  Код браузера", (Runnable) () -> openScreen(CodeActivity.class)},
+        };
+        View gap = new View(this);
+        panel.addView(gap, new LinearLayout.LayoutParams(1, dp(12)));
+        TypedValue ripple = new TypedValue();
+        getTheme().resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
+        for (Object[] r : rows) {
+            TextView row = new TextView(this);
+            row.setText((String) r[0]);
+            row.setTextSize(16);
+            row.setTextColor(C_TEXT);
+            row.setPadding(dp(10), dp(14), dp(10), dp(14));
+            row.setBackgroundResource(ripple.resourceId);
+            Runnable action = (Runnable) r[1];
+            row.setOnClickListener(v -> {
+                close[0].run();
+                action.run();
+            });
+            panel.addView(row);
+        }
+        close[0] = overlay(panel, false);
+        panel.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK);
+    }
+
+    /** Captures a small picture of a tab for the tab cards. Kept in memory only. */
+    private void snapshot(Tab t) {
+        if (t == null || t.view == null || t.view.getWidth() == 0) return;
+        try {
+            float s = 0.35f;
+            Bitmap b = Bitmap.createBitmap(Math.max(1, (int) (t.view.getWidth() * s)),
+                    Math.max(1, (int) (t.view.getHeight() * s)), Bitmap.Config.RGB_565);
+            android.graphics.Canvas c = new android.graphics.Canvas(b);
+            c.scale(s, s);
+            c.translate(-t.view.getScrollX(), -t.view.getScrollY());
+            t.view.draw(c);
+            if (t.thumb != null) t.thumb.recycle();
+            t.thumb = b;
+        } catch (RuntimeException | OutOfMemoryError ignored) {
+            // No picture: the card shows the title only.
+        }
+    }
+
+    /** Full: tabs as cards. Tap opens, swipe sideways closes and wipes. */
+    private void showTabCards() {
+        snapshot(current);
+        LinearLayout panel = sheetPanel();
+        Runnable[] close = new Runnable[1];
+
+        LinearLayout head = new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = new TextView(this);
+        title.setText("Вкладки · " + tabs.size());
+        title.setTextSize(22);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(C_TEXT);
+        head.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        TextView add = new TextView(this);
+        add.setText("＋  Новая");
+        add.setTextColor(pal.onAccent);
+        add.setTypeface(Typeface.DEFAULT_BOLD);
+        add.setPadding(dp(16), dp(10), dp(16), dp(10));
+        add.setBackground(rounded(C_ACCENT, dp(18)));
+        add.setOnClickListener(v -> {
+            close[0].run();
+            newTab(null);
+        });
+        head.addView(add);
+        panel.addView(head);
+
+        TextView hint = new TextView(this);
+        hint.setText("Смахните карточку в сторону — вкладка закроется, всё её стирается.");
+        hint.setTextColor(C_MUTED);
+        hint.setTextSize(12);
+        hint.setPadding(0, dp(6), 0, dp(12));
+        panel.addView(hint);
+
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        android.widget.GridLayout grid = new android.widget.GridLayout(this);
+        grid.setColumnCount(2);
+        scroll.addView(grid);
+        panel.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+
+        int cardW = (getResources().getDisplayMetrics().widthPixels - dp(36) - dp(20)) / 2;
+        for (Tab t : new ArrayList<>(tabs)) {
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setBackground(rounded(fieldColor(), dp(18)));
+            card.setClipToOutline(true);
+            if (t == current) {
+                GradientDrawable sel = rounded(fieldColor(), dp(18));
+                sel.setStroke(dp(2), C_ACCENT);
+                card.setBackground(sel);
+            }
+            android.widget.ImageView pic = new android.widget.ImageView(this);
+            pic.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+            pic.setBackgroundColor(C_BG);
+            if (t.thumb != null) pic.setImageBitmap(t.thumb);
+            card.addView(pic, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (cardW * 1.25f)));
+            TextView name = new TextView(this);
+            name.setText(t.title);
+            name.setSingleLine(true);
+            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            name.setTextColor(C_TEXT);
+            name.setTextSize(13);
+            name.setTypeface(Typeface.DEFAULT_BOLD);
+            name.setPadding(dp(12), dp(10), dp(12), dp(12));
+            card.addView(name);
+            android.widget.GridLayout.LayoutParams gl = new android.widget.GridLayout.LayoutParams();
+            gl.width = cardW;
+            gl.setMargins(dp(5), dp(5), dp(5), dp(5));
+            grid.addView(card, gl);
+
+            float[] start = new float[2];
+            boolean[] moved = new boolean[1];
+            card.setOnTouchListener((v, e) -> {
+                switch (e.getActionMasked()) {
+                    case android.view.MotionEvent.ACTION_DOWN:
+                        start[0] = e.getRawX();
+                        start[1] = e.getRawY();
+                        moved[0] = false;
+                        v.animate().scaleX(0.97f).scaleY(0.97f).setDuration(100).start();
+                        return true;
+                    case android.view.MotionEvent.ACTION_MOVE: {
+                        float dx = e.getRawX() - start[0];
+                        if (Math.abs(dx) > dp(8)) {
+                            moved[0] = true;
+                            v.getParent().requestDisallowInterceptTouchEvent(true);
+                        }
+                        if (moved[0]) {
+                            v.setTranslationX(dx);
+                            v.setAlpha(1f - Math.min(0.8f, Math.abs(dx) / v.getWidth()));
+                        }
+                        return true;
+                    }
+                    case android.view.MotionEvent.ACTION_UP:
+                    case android.view.MotionEvent.ACTION_CANCEL: {
+                        float dx = e.getRawX() - start[0];
+                        if (moved[0] && Math.abs(dx) > v.getWidth() / 3f) {
+                            v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+                            v.animate().translationX(Math.signum(dx) * v.getWidth() * 1.5f).alpha(0f).setDuration(180)
+                                    .withEndAction(() -> {
+                                        closeTab(t);
+                                        close[0].run();
+                                        if (tabs.size() > 1) showTabCards();
+                                    }).start();
+                        } else if (!moved[0] && e.getActionMasked() == android.view.MotionEvent.ACTION_UP) {
+                            v.animate().scaleX(1.06f).scaleY(1.06f).alpha(0f).setDuration(200)
+                                    .withEndAction(() -> {
+                                        close[0].run();
+                                        switchTo(t);
+                                    }).start();
+                        } else {
+                            v.animate().translationX(0).alpha(1f).scaleX(1f).scaleY(1f).setDuration(260)
+                                    .setInterpolator(new android.view.animation.OvershootInterpolator(1.4f)).start();
+                        }
+                        return true;
+                    }
+                    default:
+                        return false;
+                }
+            });
+        }
+        close[0] = overlay(panel, true);
+    }
+
+    /** Full: three short screens on first launch about what Maxclean does. */
+    private void showIntro() {
+        String[][] pages = {
+                {"🧅", "Tor внутри", "Ваш трафик идёт через три случайных узла сети Tor. Провайдер не видит, какие сайты вы открываете, а сайты не видят ваш адрес."},
+                {"🧹", "Ничего не остаётся", "Закрыли вкладку — cookies, история и кэш стёрты. Ни аккаунтов, ни статистики, ни связи с разработчиком."},
+                {"🛡", "Без рекламы и слежки", "Реклама, трекеры и майнеры блокируются ещё до загрузки. Каждый фильтр можно включить или выключить в настройках."},
+        };
+        FrameLayout layer = new FrameLayout(this);
+        layer.setBackgroundColor(C_BG);
+        layer.setClickable(true);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER_HORIZONTAL);
+        box.setPadding(dp(32), 0, dp(32), 0);
+        TextView glyph = new TextView(this);
+        glyph.setTextSize(72);
+        glyph.setGravity(Gravity.CENTER);
+        TextView head = new TextView(this);
+        head.setTextSize(30);
+        head.setTypeface(Typeface.DEFAULT_BOLD);
+        head.setTextColor(C_TEXT);
+        head.setGravity(Gravity.CENTER);
+        head.setPadding(0, dp(18), 0, dp(12));
+        TextView body = new TextView(this);
+        body.setTextSize(16);
+        body.setTextColor(C_MUTED);
+        body.setGravity(Gravity.CENTER);
+        body.setLineSpacing(0, 1.3f);
+        box.addView(glyph);
+        box.addView(head);
+        box.addView(body);
+        layer.addView(box, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+
+        LinearLayout dots = new LinearLayout(this);
+        dots.setGravity(Gravity.CENTER);
+        View[] dotViews = new View[pages.length];
+        for (int i = 0; i < pages.length; i++) {
+            View d = new View(this);
+            dotViews[i] = d;
+            LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(dp(8), dp(8));
+            dl.setMargins(dp(4), 0, dp(4), 0);
+            dots.addView(d, dl);
+        }
+        TextView next = new TextView(this);
+        next.setTextColor(pal.onAccent);
+        next.setTextSize(16);
+        next.setTypeface(Typeface.DEFAULT_BOLD);
+        next.setGravity(Gravity.CENTER);
+        next.setBackground(rounded(C_ACCENT, dp(20)));
+        LinearLayout bottom = new LinearLayout(this);
+        bottom.setOrientation(LinearLayout.VERTICAL);
+        bottom.addView(dots);
+        LinearLayout.LayoutParams nl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56));
+        nl.setMargins(dp(24), dp(22), dp(24), dp(28));
+        bottom.addView(next, nl);
+        layer.addView(bottom, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
+        Palette.applyFont(this, layer);
+        appFrame.addView(layer);
+
+        int[] page = {0};
+        Runnable show = new Runnable() {
+            @Override
+            public void run() {
+                String[] p = pages[page[0]];
+                glyph.setText(p[0]);
+                head.setText(p[1]);
+                body.setText(p[2]);
+                next.setText(page[0] == pages.length - 1 ? "Начать" : "Далее");
+                for (int i = 0; i < dotViews.length; i++) {
+                    dotViews[i].setBackground(rounded(i == page[0] ? C_ACCENT : C_MUTED, dp(4)));
+                    dotViews[i].setAlpha(i == page[0] ? 1f : 0.4f);
+                }
+                if (Palette.animations(MainActivity.this)) {
+                    box.setAlpha(0f);
+                    box.setTranslationX(dp(40));
+                    box.animate().alpha(1f).translationX(0).setDuration(320)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f)).start();
+                    glyph.setScaleX(0.5f);
+                    glyph.setScaleY(0.5f);
+                    glyph.animate().scaleX(1f).scaleY(1f).setDuration(480)
+                            .setInterpolator(new android.view.animation.OvershootInterpolator(2f)).start();
+                }
+            }
+        };
+        next.setOnClickListener(v -> {
+            v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+            if (page[0] < pages.length - 1) {
+                page[0]++;
+                show.run();
+                return;
+            }
+            Prefs.get(this).edit().putBoolean(Prefs.ONBOARDED, true).apply();
+            layer.animate().alpha(0f).setDuration(300).withEndAction(() -> appFrame.removeView(layer)).start();
+        });
+        show.run();
+    }
+
+    /**
+     * Full: the page fills the screen, the address bar floats at the bottom as a rounded card
+     * (easy to reach with a thumb), and messages float at the top.
+     */
+    private View fullLayout(LinearLayout root, LinearLayout bar) {
+        root.removeAllViews();
+        FrameLayout frame = new FrameLayout(this);
+        frame.setBackgroundColor(C_BG);
+
+        FrameLayout.LayoutParams pageLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        pageLp.bottomMargin = dp(84);
+        frame.addView(container, pageLp);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable cardBg = new GradientDrawable();
+        cardBg.setColor(C_PANEL);
+        cardBg.setCornerRadius(dp(26));
+        cardBg.setStroke(1, pal.dark ? 0x22FFFFFF : 0x14000000);
+        card.setBackground(cardBg);
+        card.setElevation(dp(14));
+        card.setClipToOutline(true);
+        card.setPadding(dp(6), dp(4), dp(6), dp(4));
+        bar.setBackgroundColor(Color.TRANSPARENT);
+        progress.setVisibility(View.INVISIBLE);
+        card.addView(progress, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2)));
+        card.addView(bar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
+        FrameLayout.LayoutParams cardLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
+        cardLp.setMargins(dp(12), 0, dp(12), dp(12));
+        frame.addView(card, cardLp);
+
+        GradientDrawable bannerBg = new GradientDrawable();
+        bannerBg.setCornerRadius(dp(16));
+        banner.setBackground(bannerBg);
+        banner.setElevation(dp(10));
+        banner.setPadding(dp(16), dp(12), dp(16), dp(12));
+        FrameLayout.LayoutParams bannerLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP);
+        bannerLp.setMargins(dp(12), dp(12), dp(12), 0);
+        frame.addView(banner, bannerLp);
+
+        // A light tap of feedback on every bar button.
+        for (int i = 0; i < bar.getChildCount(); i++) {
+            View b = bar.getChildAt(i);
+            if (b instanceof TextView && !(b instanceof EditText)) {
+                b.setOnTouchListener((v, e) -> {
+                    if (e.getAction() == android.view.MotionEvent.ACTION_DOWN) {
+                        v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+                        if (Palette.animations(this)) v.animate().scaleX(0.86f).scaleY(0.86f).setDuration(90).start();
+                    } else if (e.getAction() == android.view.MotionEvent.ACTION_UP
+                            || e.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
+                        v.animate().scaleX(1f).scaleY(1f).setDuration(180)
+                                .setInterpolator(new android.view.animation.OvershootInterpolator(3f)).start();
+                    }
+                    return false;
+                });
+            }
+        }
+        return frame;
     }
 
     private void updateEngineButton() {
@@ -364,7 +833,11 @@ public class MainActivity extends Activity {
     private void showBanner(String text, int color) {
         boolean wasHidden = banner.getVisibility() != View.VISIBLE;
         banner.setText(text);
-        banner.setBackgroundColor(color);
+        if (banner.getBackground() instanceof GradientDrawable) {
+            ((GradientDrawable) banner.getBackground()).setColor(color);
+        } else {
+            banner.setBackgroundColor(color);
+        }
         // Readable on any background: dark text only on the light theme's panel.
         banner.setTextColor(color == C_PANEL ? C_TEXT : Color.WHITE);
         banner.setVisibility(View.VISIBLE);
@@ -552,6 +1025,7 @@ public class MainActivity extends Activity {
     }
 
     private void switchTo(Tab t) {
+        if (BuildConfig.FULL && current != null && current != t) snapshot(current);
         boolean animate = current != t && Palette.animations(this);
         current = t;
         container.removeAllViews();
@@ -583,6 +1057,10 @@ public class MainActivity extends Activity {
 
     private void destroyTab(Tab t) {
         tabs.remove(t);
+        if (t.thumb != null) {
+            t.thumb.recycle();
+            t.thumb = null;
+        }
         if (t.view == null) return;
         container.removeView(t.view);
         Wiper.wipeWebView(this, t.view);
@@ -592,6 +1070,10 @@ public class MainActivity extends Activity {
     }
 
     private void showTabs() {
+        if (BuildConfig.FULL) {
+            showTabCards();
+            return;
+        }
         String[] titles = new String[tabs.size()];
         for (int i = 0; i < tabs.size(); i++) {
             Tab t = tabs.get(i);
@@ -786,7 +1268,48 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static String fontDataUri;
+
+    /** Full: the living start page from assets/home.html, filled in with this session's values. */
+    private String fullHomeHtml() {
+        String tpl = readAsset("home.html");
+        if (tpl.isEmpty()) return "";
+        if (fontDataUri == null) {
+            byte[] font = readAssetBytes("fonts/Manrope.ttf");
+            fontDataUri = font.length == 0 ? "''"
+                    : "data:font/ttf;base64," + Base64.encodeToString(font, Base64.NO_WRAP);
+        }
+        StringBuilder tiles = new StringBuilder();
+        for (String[] link : QuickLinks.list(this)) {
+            String name = android.text.TextUtils.htmlEncode(link[0]);
+            String letter = android.text.TextUtils.htmlEncode(link[0].substring(0, 1).toUpperCase());
+            tiles.append("<a class='tile' href='").append(android.text.TextUtils.htmlEncode(link[1]))
+                    .append("'><b>").append(letter).append("</b><span>").append(name).append("</span></a>");
+        }
+        java.util.Date now = new java.util.Date();
+        boolean bridges = !Prefs.BRIDGES_NONE.equals(Prefs.str(this, Prefs.BRIDGES, Prefs.BRIDGES_NONE));
+        String torText = !torEnabled ? "Tor выключен — нажмите 🧅"
+                : !torReady ? "Подключаюсь к Tor…"
+                : "Tor включён · 3 узла" + (bridges ? " · мосты" : "");
+        return tpl.replace("{{FONT}}", fontDataUri)
+                .replace("{{BG}}", Palette.hex(C_BG)).replace("{{TEXT}}", Palette.hex(C_TEXT))
+                .replace("{{MUTED}}", Palette.hex(C_MUTED)).replace("{{ACCENT}}", Palette.hex(C_ACCENT))
+                .replace("{{TOR}}", Palette.hex(C_TOR))
+                .replace("{{GLASS}}", pal.dark ? "rgba(255,255,255,.07)" : "rgba(255,255,255,.62)")
+                .replace("{{LINE}}", pal.dark ? "rgba(255,255,255,.12)" : "rgba(20,23,28,.09)")
+                .replace("{{TORCLASS}}", torEnabled && torReady ? "on" : "")
+                .replace("{{TORTEXT}}", torText)
+                .replace("{{TORON}}", torEnabled && torReady ? "true" : "false")
+                .replace("{{TIME}}", new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(now))
+                .replace("{{DATE}}", new java.text.SimpleDateFormat("EEEE, d MMMM", new java.util.Locale("ru")).format(now))
+                .replace("{{TILES}}", tiles.toString());
+    }
+
     private String homeHtml() {
+        if (BuildConfig.FULL) {
+            String full = fullHomeHtml();
+            if (!full.isEmpty()) return full;
+        }
         String bg = Palette.hex(C_BG), text = Palette.hex(C_TEXT), muted = Palette.hex(C_MUTED);
         String accent = Palette.hex(C_ACCENT), tor = Palette.hex(C_TOR), panel = Palette.hex(C_PANEL);
         String mode = torEnabled
@@ -866,6 +1389,12 @@ public class MainActivity extends Activity {
                     || scheme.equals("data") || scheme.equals("blob") || scheme.equals("javascript")) {
                 return false;
             }
+            if (scheme.equals("maxclean") && "search".equals(uri.getHost())) {
+                // The search box on the Full start page: search with the chosen engine.
+                String q = uri.getQueryParameter("q");
+                if (q != null && !q.trim().isEmpty()) submit(q);
+                return true;
+            }
             // intent://, market://, tel: and the like would hand your visit to another app.
             Toast.makeText(MainActivity.this, "Внешняя ссылка заблокирована: " + scheme + ":",
                     Toast.LENGTH_SHORT).show();
@@ -901,7 +1430,7 @@ public class MainActivity extends Activity {
         public void onProgressChanged(WebView view, int p) {
             if (tab != current) return;
             progress.setProgress(p, Palette.animations(MainActivity.this));
-            progress.setVisibility(p >= 100 ? View.GONE : View.VISIBLE);
+            progress.setVisibility(p >= 100 ? (BuildConfig.FULL ? View.INVISIBLE : View.GONE) : View.VISIBLE);
         }
 
         @Override
@@ -950,6 +1479,10 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------------- menu
 
     private void showMenu(View anchor) {
+        if (BuildConfig.FULL) {
+            showSheetMenu();
+            return;
+        }
         PopupMenu m = new PopupMenu(this, anchor);
         m.getMenu().add(0, 1, 0, "Новая вкладка");
         m.getMenu().add(0, 2, 0, "Закрыть вкладку (стереть)");
@@ -1040,6 +1573,18 @@ public class MainActivity extends Activity {
             }
         }
         return null;
+    }
+
+    private byte[] readAssetBytes(String name) {
+        try (InputStream in = getAssets().open(name)) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[16384];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            return out.toByteArray();
+        } catch (IOException e) {
+            return new byte[0];
+        }
     }
 
     private String readAsset(String name) {

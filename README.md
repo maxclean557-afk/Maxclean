@@ -11,7 +11,7 @@
 | Версия | Для кого | Файл |
 |---|---|---|
 | **Maxclean** | Лёгкая: простой тёмный интерфейс, все функции защиты | [`Maxclean.apk`](../../releases/latest/download/Maxclean.apk) |
-| **Maxclean Full** | То же плюс оформление: светлая и тёмная темы, цвета, 5 иконок на выбор, анимации | [`Maxclean-Full.apk`](../../releases/latest/download/Maxclean-Full.apk) |
+| **Maxclean Full** | То же плюс новый интерфейс: живая стартовая страница с 3D-глобусом сети Tor и часами, плавающая адресная строка, меню-шторка, вкладки карточками, знакомство при первом запуске, шрифт Manrope, светлая и тёмная темы, 5 цветов и 5 иконок | [`Maxclean-Full.apk`](../../releases/latest/download/Maxclean-Full.apk) |
 
 Все версии и контрольные суммы (`SHA256SUMS.txt`) — на [странице релизов](../../releases). Android 8.0+.
 
@@ -61,7 +61,8 @@
    | `Bridges.java` | мосты Tor и настройки прокси |
    | `ProxyChain.java` | цепочка прокси: локальный SOCKS5-сервер на 127.0.0.1 |
    | `Disguise.java` | профили устройств и местоположение для сайтов |
-   | `Palette.java`, `Icons.java` | оформление версии Full: темы, цвета, иконки |
+   | `Palette.java`, `Icons.java`, `QuickLinks.java` | оформление версии Full: темы, цвета, иконки, плитки |
+   | [`app/src/full/assets/home.html`](app/src/full/assets/home.html) | стартовая страница Full: всё локально, без запросов в сеть |
    | `AdBlocker.java` | блокировка доменов из [`assets/filters`](app/src/main/assets/filters) |
    | `Wiper.java` | стирание cookies, кэша и данных |
    | `SearchEngines.java` | список поисковиков |
@@ -101,6 +102,7 @@
 - [tor-android](https://github.com/guardianproject/tor-android) от Guardian Project (Tor 0.4.8)
 - [IPtProxy](https://github.com/tladesignz/IPtProxy) — мосты obfs4, Snowflake, WebTunnel (Lyrebird и Snowflake от Tor Project)
 - [AndroidX WebKit](https://developer.android.com/jetpack/androidx/releases/webkit)
+- Шрифт [Manrope](https://github.com/googlefonts/manrope) (только в Full) — лицензия SIL Open Font License, [`OFL.txt`](app/src/full/assets/fonts/OFL.txt)
 
 ## Лицензия
 

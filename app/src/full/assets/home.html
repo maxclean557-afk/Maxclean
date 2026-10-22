@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!-- Maxclean Full start page. Everything here is local: no network requests, no stored data.
+     {{…}} values are filled in by MainActivity.homeHtml(). -->
+<style>
+@font-face { font-family: "Manrope"; src: url({{FONT}}) format("truetype"); font-weight: 200 800; }
+:root {
+  --bg: {{BG}}; --text: {{TEXT}}; --muted: {{MUTED}}; --accent: {{ACCENT}}; --tor: {{TOR}};
+  --glass: {{GLASS}}; --line: {{LINE}};
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font-family: "Manrope", system-ui, sans-serif; overflow: hidden; }
+
+/* Living background: soft lights drifting slowly. */
+.orb { position: fixed; border-radius: 50%; filter: blur(70px); opacity: .55; will-change: transform; }
+.o1 { width: 70vw; height: 70vw; left: -20vw; top: -10vh; background: var(--accent); animation: drift1 19s ease-in-out infinite alternate; }
+.o2 { width: 60vw; height: 60vw; right: -25vw; top: 35vh; background: var(--tor); animation: drift2 23s ease-in-out infinite alternate; }
+.o3 { width: 50vw; height: 50vw; left: 10vw; bottom: -25vh; background: var(--accent); opacity: .35; animation: drift3 27s ease-in-out infinite alternate; }
+@keyframes drift1 { to { transform: translate(18vw, 12vh) scale(1.15); } }
+@keyframes drift2 { to { transform: translate(-22vw, -8vh) scale(.9); } }
+@keyframes drift3 { to { transform: translate(14vw, -10vh) scale(1.2); } }
+
+#globe { position: fixed; left: 50%; top: 50%; width: 120vmin; height: 120vmin; transform: translate(-50%, -58%);
+  opacity: .9; touch-action: none; }
+
+main { position: relative; z-index: 2; height: 100%; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 22px; padding: 0 22px; text-align: center; pointer-events: none; }
+/* The globe underneath stays touchable everywhere except on the controls. */
+.status, form, .tiles { pointer-events: auto; }
+
+.status { display: inline-flex; align-items: center; gap: 9px; padding: 9px 16px; border-radius: 999px;
+  background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  font-size: 13px; font-weight: 600; letter-spacing: .02em; color: var(--text); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.on .dot { background: var(--tor); box-shadow: 0 0 0 0 var(--tor); animation: ping 2.2s ease-out infinite; }
+@keyframes ping { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tor) 70%, transparent); }
+  100% { box-shadow: 0 0 0 12px transparent; } }
+
+.clock { font-size: clamp(64px, 24vw, 128px); font-weight: 800; letter-spacing: -.04em; line-height: .95;
+  font-variant-numeric: tabular-nums; text-shadow: 0 6px 40px color-mix(in srgb, var(--accent) 35%, transparent); }
+.date { margin-top: -10px; font-size: 15px; font-weight: 500; color: var(--muted); }
+.date::first-letter { text-transform: uppercase; }
+
+form { width: min(560px, 100%); }
+.search { display: flex; align-items: center; gap: 12px; padding: 0 18px; height: 58px; border-radius: 20px;
+  background: var(--glass); border: 1px solid var(--line);
+  backdrop-filter: blur(22px) saturate(1.3); -webkit-backdrop-filter: blur(22px) saturate(1.3);
+  transition: box-shadow .35s, border-color .35s, transform .35s; }
+.search:focus-within { border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent), 0 12px 48px color-mix(in srgb, var(--accent) 35%, transparent);
+  transform: translateY(-2px); }
+.search svg { flex: none; opacity: .7; }
+.search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text);
+  font: 500 17px "Manrope", system-ui, sans-serif; }
+.search input::placeholder { color: var(--muted); }
+
+.tiles { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; max-width: 420px; }
+.tile { width: 70px; display: flex; flex-direction: column; align-items: center; gap: 7px; text-decoration: none; color: var(--muted);
+  font-size: 11.5px; font-weight: 600; }
+.tile b { width: 56px; height: 56px; border-radius: 18px; display: grid; place-items: center; font-size: 22px; font-weight: 800;
+  color: var(--text); background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  transition: transform .25s cubic-bezier(.2,.9,.3,1.4); }
+.tile:active b { transform: scale(.88); }
+.tile span { max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.foot { position: fixed; bottom: calc(18px + env(safe-area-inset-bottom)); left: 0; right: 0; z-index: 2; text-align: center;
+  font-size: 11.5px; color: var(--muted); letter-spacing: .04em; }
+
+/* Entrance: everything rises in, one after another. */
+.in { opacity: 0; transform: translateY(18px); animation: up .9s cubic-bezier(.16,1,.3,1) forwards; }
+.d1 { animation-delay: .05s } .d2 { animation-delay: .15s } .d3 { animation-delay: .25s } .d4 { animation-delay: .35s } .d5 { animation-delay: .5s }
+@keyframes up { to { opacity: 1; transform: none; } }
+.shown .in { opacity: 1 !important; transform: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .orb, .in, .on .dot { animation: none !important; opacity: 1; transform: none; }
+}
+</style>
+</head>
+<body>
+<div class="orb o1"></div><div class="orb o2"></div><div class="orb o3"></div>
+<canvas id="globe"></canvas>
+<main>
+  <div class="status in d1 {{TORCLASS}}"><span class="dot"></span><span>{{TORTEXT}}</span></div>
+  <div class="clock in d2" id="clock">{{TIME}}</div>
+  <div class="date in d2" id="date">{{DATE}}</div>
+  <form class="in d3" id="f" action="maxclean://search" method="get">
+    <label class="search">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" name="q" type="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Искать анонимно…" enterkeyhint="search">
+    </label>
+  </form>
+  <nav class="tiles in d4">{{TILES}}</nav>
+</main>
+<div class="foot in d5">MAXCLEAN · НИЧЕГО НЕ СОХРАНЯЕТСЯ</div>
+<script>
+(function () {
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Clock and date, live.
+  var clock = document.getElementById('clock'), date = document.getElementById('date');
+  function tick() {
+    var d = new Date();
+    clock.textContent = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    date.textContent = d.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+  }
+  tick(); setInterval(tick, 5000);
+
+  // Safety net: whatever happens to the animations, the page is fully visible after 1.5 s.
+  setTimeout(function () { document.documentElement.classList.add('shown'); }, 1500);
+
+  // Search goes back to the browser, which picks the engine.
+  document.getElementById('f').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var q = document.getElementById('q').value.trim();
+    if (q) location.href = 'maxclean://search?q=' + encodeURIComponent(q);
+  });
+
+  // The Tor globe: dots on a sphere, three glowing relays and the path through them.
+  var torOn = {{TORON}};
+  var cv = document.getElementById('globe'), ctx = cv.getContext('2d');
+  var accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  var tor = getComputedStyle(document.documentElement).getPropertyValue('--tor').trim();
+  var text = getComputedStyle(document.documentElement).getPropertyValue('--text').trim();
+  var pts = [], N = 520;
+  for (var i = 0; i < N; i++) {               // evenly spread points (Fibonacci sphere)
+    var y = 1 - (i / (N - 1)) * 2, r = Math.sqrt(1 - y * y), th = i * 2.39996;
+    pts.push([Math.cos(th) * r, y, Math.sin(th) * r]);
+  }
+  function ll(lat, lon) { lat *= Math.PI / 180; lon *= Math.PI / 180;
+    return [Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)]; }
+  var hops = [ll(30, 0), ll(52, -48), ll(12, -95), ll(-22, -40)];   // you → three relays (illustrative)
+  var rotY = 0.6, rotX = -0.35, vel = 0.0022, drag = null, last = 0, W = 0, H = 0, R = 0;
+
+  function size() {
+    var dpr = Math.min(2, window.devicePixelRatio || 1), b = cv.getBoundingClientRect();
+    W = cv.width = b.width * dpr; H = cv.height = b.height * dpr; R = Math.min(W, H) * 0.36;
+  }
+  function proj(p) {
+    var cy = Math.cos(rotY), sy = Math.sin(rotY), cx = Math.cos(rotX), sx = Math.sin(rotX);
+    var x = p[0] * cy - p[2] * sy, z = p[0] * sy + p[2] * cy;
+    var y = p[1] * cx - z * sx; z = p[1] * sx + z * cx;
+    return [W / 2 + x * R, H / 2 - y * R, z];
+  }
+  function slerp(a, b, t) {
+    var d = Math.acos(Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])));
+    if (d < 1e-6) return a;
+    var s1 = Math.sin((1 - t) * d) / Math.sin(d), s2 = Math.sin(t * d) / Math.sin(d), k = 1 + 0.18 * Math.sin(Math.PI * t);
+    return [(a[0] * s1 + b[0] * s2) * k, (a[1] * s1 + b[1] * s2) * k, (a[2] * s1 + b[2] * s2) * k];
+  }
+  function frame(now) {
+    if (document.hidden) { requestAnimationFrame(frame); return; }
+    var dt = last ? Math.min(50, now - last) : 16; last = now;
+    if (!drag) { rotY += vel * dt / 16; vel += (0.0022 - vel) * 0.02; }
+    ctx.clearRect(0, 0, W, H);
+    for (var i = 0; i < pts.length; i++) {
+      var p = proj(pts[i]); if (p[2] < -0.15) continue;
+      ctx.globalAlpha = 0.12 + 0.5 * Math.max(0, p[2]);
+      ctx.fillStyle = text; ctx.beginPath(); ctx.arc(p[0], p[1], 1.4 * (W / 900 + 0.6), 0, 6.283); ctx.fill();
+    }
+    if (torOn) {
+      var t = (now / 2600) % 1;
+      for (var h = 0; h < hops.length - 1; h++) {
+        // Draw the arc in short pieces so the part behind the globe can fade out.
+        ctx.strokeStyle = h === hops.length - 2 ? accent : tor; ctx.lineWidth = 2 * (W / 900 + 0.6);
+        var prev = proj(slerp(hops[h], hops[h + 1], 0));
+        for (var s = 1; s <= 40; s++) {
+          var q = proj(slerp(hops[h], hops[h + 1], s / 40));
+          ctx.globalAlpha = 0.12 + 0.5 * Math.max(0, Math.min(1, (q[2] + 0.3) / 0.6));
+          ctx.beginPath(); ctx.moveTo(prev[0], prev[1]); ctx.lineTo(q[0], q[1]); ctx.stroke(); prev = q;
+        }
+        var seg = t * (hops.length - 1);
+        if (Math.floor(seg) === h) {
+          var m = proj(slerp(hops[h], hops[h + 1], seg - h));
+          ctx.globalAlpha = 1; ctx.fillStyle = accent; ctx.shadowColor = accent; ctx.shadowBlur = 18;
+          ctx.beginPath(); ctx.arc(m[0], m[1], 4.5 * (W / 900 + 0.6), 0, 6.283); ctx.fill(); ctx.shadowBlur = 0;
+        }
+      }
+      for (var k = 0; k < hops.length; k++) {
+        var n = proj(hops[k]); if (n[2] < -0.1) continue;
+        ctx.globalAlpha = 0.9; ctx.fillStyle = k === 0 ? accent : tor; ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 22;
+        ctx.beginPath(); ctx.arc(n[0], n[1], (k === 0 ? 6 : 5) * (W / 900 + 0.6), 0, 6.283); ctx.fill(); ctx.shadowBlur = 0;
+      }
+    }
+    ctx.globalAlpha = 1;
+    if (!reduce) requestAnimationFrame(frame);
+  }
+  // Spin the globe with a finger; it keeps turning, then settles back to a slow spin.
+  cv.addEventListener('pointerdown', function (e) { drag = { x: e.clientX, y: e.clientY }; vel = 0; cv.setPointerCapture(e.pointerId); });
+  cv.addEventListener('pointermove', function (e) {
+    if (!drag) return;
+    var dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY };
+    rotY += dx * 0.008; rotX = Math.max(-1.2, Math.min(1.2, rotX + dy * 0.006)); vel = dx * 0.008;
+  });
+  cv.addEventListener('pointerup', function () { drag = null; });
+  window.addEventListener('resize', size);
+  size(); requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
