@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'">
+<title>Maxclean</title>
+<link rel="stylesheet" href="ui.css">
+</head>
+<body>
+<header id="chrome">
+  <div class="tabstrip" id="tabstrip">
+    <div class="brand" title="Maxclean"><svg width="22" height="22" viewBox="0 0 108 108"><path d="M54,22 L78,31 L78,51 C78,68 67,80 54,85 C41,80 30,68 30,51 L30,31 Z" class="brand-shield"/><path d="M42,64 L42,42 L47,42 L54,53 L61,42 L66,42 L66,64 L61,64 L61,51 L54,61 L47,51 L47,64 Z" class="brand-m"/></svg></div>
+    <div class="tabs" id="tabs"></div>
+    <button class="newtab" id="newtab" title="Новая вкладка (Ctrl+T)">+</button>
+    <div class="drag"></div>
+  </div>
+  <div class="toolbar">
+    <button class="tb" id="back" title="Назад (Alt+←)"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <button class="tb" id="forward" title="Вперёд (Alt+→)"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+    <button class="tb" id="reload" title="Обновить (F5)"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></button>
+    <button class="tb" id="home" title="Стартовая страница"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"/></svg></button>
+    <label class="address" id="address">
+      <button class="engine" id="engine" title="Поисковик">MC</button>
+      <input id="url" spellcheck="false" autocomplete="off" placeholder="Поиск или адрес — анонимно">
+      <span class="shield" id="blocked" title="Заблокировано на странице">0</span>
+    </label>
+    <button class="torpill" id="tor" title="Tor">
+      <span class="ring"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" class="ring-bg"/><circle cx="18" cy="18" r="15" class="ring-fg" id="ringfg"/></svg><span class="onion">🧅</span></span>
+      <span id="tortext">Tor</span>
+    </button>
+    <button class="tb" id="menu" title="Меню"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
+  </div>
+  <div class="strip" id="strip"></div>
+</header>
+
+<div id="overlay" class="overlay" hidden>
+  <div class="backdrop" id="backdrop"></div>
+  <div class="panel" id="panel"></div>
+</div>
+
+<script src="ui.js"></script>
+</body>
+</html>
