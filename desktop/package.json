@@ -1,0 +1,40 @@
+{
+  "name": "maxclean-desktop",
+  "productName": "Maxclean",
+  "version": "1.3.0",
+  "description": "Anonymous browser: built-in Tor, ad and tracker blocking, no accounts, nothing saved",
+  "main": "src/main.js",
+  "author": "Maxclean",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64"
+  },
+  "devDependencies": {
+    "electron": "44.10.0",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "az.maxclean.desktop",
+    "productName": "Maxclean",
+    "copyright": "Maxclean, MIT License",
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": ["src/**/*", "package.json"],
+    "extraResources": [{ "from": "tor", "to": "tor" }],
+    "electronLanguages": ["ru", "en-US"],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [{ "target": "nsis", "arch": ["x64"] }, { "target": "portable", "arch": ["x64"] }]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Maxclean",
+      "deleteAppDataOnUninstall": true,
+      "artifactName": "Maxclean-Full-${version}-setup.${ext}"
+    },
+    "portable": { "artifactName": "Maxclean-Full-${version}-portable.exe" }
+  }
+}

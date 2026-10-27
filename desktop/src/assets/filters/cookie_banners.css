@@ -1,0 +1,12 @@
+/* Hides cookie consent popups (the page then behaves as "not accepted"). */
+#onetrust-banner-sdk, #onetrust-consent-sdk, .onetrust-pc-dark-filter,
+#CybotCookiebotDialog, #CybotCookiebotDialogBodyUnderlay,
+.cc-window, .cc-banner, .cookie-banner, .cookie-notice, .cookie-consent,
+#cookie-banner, #cookie-notice, #cookie-consent, #cookieConsent,
+.qc-cmp2-container, #qc-cmp2-container, .fc-consent-root,
+#didomi-host, .didomi-popup, #usercentrics-root, .truste_box_overlay,
+#truste-consent-track, .cmp-container, #sp_message_container,
+[id^="sp_message_container"], .gdpr-banner, #gdpr-consent, .consent-banner {
+  display: none !important;
+}
+html, body { overflow: auto !important; }

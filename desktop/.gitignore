@@ -1,0 +1,4 @@
+node_modules/
+dist/
+# Downloaded and signature-checked at build time (scripts/fetch-tor.sh)
+tor/

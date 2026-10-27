@@ -1,0 +1,26 @@
+# Social widgets and pixels that follow you across sites.
+connect.facebook.net
+facebook.com/tr
+pixel.facebook.com
+graph.facebook.com
+platform.twitter.com
+syndication.twitter.com
+analytics.twitter.com
+platform.linkedin.com
+snap.licdn.com
+px.ads.linkedin.com
+assets.pinterest.com
+ct.pinterest.com
+analytics.tiktok.com
+sc-static.net
+tr.snapchat.com
+vk.com/rtrg
+top-fwz1.mail.ru
+connect.ok.ru
+widgets.ok.ru
+userapi.com/rtrg
+addthis.com
+addtoany.com
+sharethis.com
+disqus.com
+disquscdn.com
