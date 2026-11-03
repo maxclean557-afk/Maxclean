@@ -24,7 +24,8 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '21'
+          # The Tor library (tor-android 0.4.9) is compiled for Java 24.
+          java-version: '24'
 
       # The release key lives in repository secrets, never in the code.
       - name: Signing key
@@ -58,7 +59,7 @@ jobs:
           cp app/build/outputs/apk/full/release/app-full-release.apk Maxclean-Full.apk
           sha256sum Maxclean.apk Maxclean-Full.apk | tee SHA256SUMS.txt
           for f in Maxclean.apk Maxclean-Full.apk; do
-            "$ANDROID_HOME"/build-tools/34.0.0/apksigner verify --print-certs "$f" | grep -E "SHA-256|DN"
+            "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner" verify --print-certs "$f" | grep -E "SHA-256|DN"
           done
 
       - uses: actions/upload-artifact@v5

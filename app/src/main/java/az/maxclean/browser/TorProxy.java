@@ -62,31 +62,23 @@ public final class TorProxy {
 
     private TorService service;
     private boolean bound;
-    private boolean wanted;
-    private boolean ready;
-    private int generation;
+    private volatile boolean wanted;
+    private volatile boolean ready;
+    /** route() has run for this start: the poll and the ON broadcast may both call it. */
+    private boolean routing;
+    private volatile int generation;
     private Controller transports;
     private Set<String> running;
     /** Chain in front of Tor, and the one the browser uses (Tor plus the proxy after it). */
     private ProxyChain chainIn, chainOut;
+    /** The bridges and proxies the running Tor was started with. */
+    private String torSig;
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder binder) {
             service = ((TorService.LocalBinder) binder).getService();
-            // Tor may already be up from before (no new ON broadcast then).
-            TorService s = service;
-            new Thread(() -> {
-                try {
-                    if ("1".equals(s.getInfo("status/circuit-established").trim())) {
-                        main.post(() -> {
-                            if (wanted && !ready) route(s.getSocksPort());
-                        });
-                    }
-                } catch (Exception ignored) {
-                    // Not started yet; the ON broadcast will follow.
-                }
-            }).start();
+            waitForCircuit(service, generation);
         }
 
         @Override
@@ -106,8 +98,7 @@ public final class TorProxy {
             }
             String status = intent.getStringExtra(TorService.EXTRA_STATUS);
             if (TorService.STATUS_ON.equals(status) && !ready) {
-                int port = TorService.socksPort;
-                if (port <= 0 && service != null) port = service.getSocksPort();
+                int port = service != null ? service.getSocksPort() : -1;
                 if (port <= 0) {
                     fail("Tor запустился без SOCKS-порта");
                     return;
@@ -133,10 +124,40 @@ public final class TorProxy {
         return ready;
     }
 
+    /**
+     * Asks Tor itself once a second whether it has a circuit, rather than rely only on the ON
+     * broadcast: it can come before we listen, or (tor-android 0.4.9) not at all.
+     */
+    private void waitForCircuit(TorService s, int gen) {
+        new Thread(() -> {
+            while (wanted && gen == generation && !ready) {
+                try {
+                    String info = s.getInfo("status/circuit-established");
+                    if (info != null && "1".equals(info.trim())) {
+                        int port = s.getSocksPort();
+                        if (port > 0) {
+                            main.post(() -> {
+                                if (wanted && gen == generation && !ready) route(port);
+                            });
+                            return;
+                        }
+                    }
+                } catch (Exception ignored) {
+                    // The control connection is not open yet.
+                }
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        }).start();
+    }
+
     public void start() {
-        shutdown();
         wanted = true;
         ready = false;
+        routing = false;
         int gen = ++generation;
         if (!isSupported()) {
             fail("Ваш системный WebView слишком старый для Tor. Обновите \"Android System WebView\".");
@@ -154,8 +175,20 @@ public final class TorProxy {
         if (!before.isEmpty()) how += " через " + hops(before.size()) + " перед ним";
         if (after != null) how += ", с прокси после него";
         listener.onStarting(how);
+        String sig = bridges + "|" + before;
+        if (bound && service != null && sig.equals(torSig)) {
+            // Tor still runs with the same settings (it was only switched off in the browser):
+            // use it again instead of restarting it in this process.
+            stopChainOut();
+            TorService s = service;
+            setProxy(BLACKHOLE, () -> waitForCircuit(s, gen));
+            return;
+        }
+        shutdown();
+        torSig = sig;
         // Close the door first, then start Tor.
-        setProxy(BLACKHOLE, () -> new Thread(() -> {
+        setProxy(BLACKHOLE, () -> BRIDGE_THREAD.execute(() -> {
+            if (!wanted || gen != generation) return; // turned off or restarted meanwhile
             try {
                 // Tor takes one upstream proxy: a local chain server stands in for the whole chain.
                 String proxy = "";
@@ -174,13 +207,18 @@ public final class TorProxy {
                 bound = app.bindService(new Intent(app, TorService.class), connection, Context.BIND_AUTO_CREATE);
                 if (!bound) fail("Не удалось запустить Tor");
             });
-        }).start());
+        }));
     }
 
+    /**
+     * Tor off in the browser. Tor itself keeps running, so switching it back on is instant: it
+     * runs inside this process, and starting it again and again can bring the process down.
+     */
     public void stop() {
-        shutdown();
+        stopChainOut();
         wanted = false;
         ready = false;
+        routing = false;
         generation++;
         if (!isSupported()) {
             listener.onOff("");
@@ -224,11 +262,16 @@ public final class TorProxy {
         shutdown();
     }
 
-    private void shutdown() {
-        if (chainIn != null) chainIn.stop();
+    private void stopChainOut() {
         if (chainOut != null) chainOut.stop();
-        chainIn = null;
         chainOut = null;
+    }
+
+    private void shutdown() {
+        torSig = null;
+        if (chainIn != null) chainIn.stop();
+        chainIn = null;
+        stopChainOut();
         if (bound) {
             app.unbindService(connection);
             bound = false;
@@ -239,37 +282,54 @@ public final class TorProxy {
         transports = null;
         running = null;
         if (c != null && r != null) {
-            new Thread(() -> {
+            // On the bridge thread, so a restart can't start bridges before these have stopped.
+            BRIDGE_THREAD.execute(() -> {
                 for (String t : r) {
                     try {
                         c.stop(t);
                     } catch (Exception ignored) {
                     }
                 }
-            }).start();
+            });
         }
     }
+
+    /**
+     * IPtProxy makes one controller per process: asking again returns null. So it is made once
+     * and kept, and its events go to whichever TorProxy started the bridges last.
+     */
+    private static Controller bridgeController;
+    private static volatile TorProxy bridgeOwner;
+    /** All bridge starts and stops, in order. */
+    private static final java.util.concurrent.ExecutorService BRIDGE_THREAD =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
 
     private Map<String, Long> startTransports(Set<String> needed, String proxy) throws Exception {
         Map<String, Long> ports = new LinkedHashMap<>();
         if (needed.isEmpty()) return ports;
-        File state = new File(app.getFilesDir(), "pt_state");
-        //noinspection ResultOfMethodCallIgnored
-        state.mkdirs();
-        Controller c = IPtProxy.newController(state.getAbsolutePath(), false, false, "ERROR", new OnTransportEvents() {
-            @Override
-            public void connected(String name) {
-            }
+        bridgeOwner = this;
+        if (bridgeController == null) {
+            File state = new File(app.getFilesDir(), "pt_state");
+            //noinspection ResultOfMethodCallIgnored
+            state.mkdirs();
+            bridgeController = IPtProxy.newController(state.getAbsolutePath(), false, false, "ERROR", new OnTransportEvents() {
+                @Override
+                public void connected(String name) {
+                }
 
-            @Override
-            public void error(String name, Exception e) {
-                fail("Мост " + name + " не работает: " + (e == null ? "" : e.getMessage()));
-            }
+                @Override
+                public void error(String name, Exception e) {
+                    TorProxy owner = bridgeOwner;
+                    if (owner != null) owner.fail("Мост " + name + " не работает: " + (e == null ? "" : e.getMessage()));
+                }
 
-            @Override
-            public void stopped(String name, Exception e) {
-            }
-        });
+                @Override
+                public void stopped(String name, Exception e) {
+                }
+            });
+            if (bridgeController == null) throw new IOException("IPtProxy не создал контроллер мостов");
+        }
+        Controller c = bridgeController;
         transports = c;
         running = needed;
         for (String t : needed) {
@@ -290,6 +350,8 @@ public final class TorProxy {
     }
 
     private void route(int port) {
+        if (routing) return;
+        routing = true;
         ProxyChain.Hop after = Bridges.proxyAfter(app);
         if (after == null) {
             // socks5 makes Chromium send host names to Tor: DNS goes through Tor and .onion works.

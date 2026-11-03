@@ -20,8 +20,8 @@ android {
         applicationId 'az.maxclean.browser'
         minSdk 26
         targetSdk 34
-        versionCode 4
-        versionName '1.3'
+        versionCode 5
+        versionName '1.3.1'
     }
 
     buildFeatures {
@@ -73,8 +73,9 @@ android {
 
 dependencies {
     implementation 'androidx.webkit:webkit:1.11.0'
-    // Tor itself (Guardian Project, the makers of Orbot), 0.4.8 long-term-support branch
-    implementation 'info.guardianproject:tor-android:0.4.8.22'
+    // Tor itself (Guardian Project, the makers of Orbot). 0.4.8 no longer works: the Tor network
+    // now requires protocols (Desc=3, Microdesc=3) that only 0.4.9 has.
+    implementation 'info.guardianproject:tor-android:0.4.9.14'
     implementation 'info.guardianproject:jtorctl:0.4.5.7'
     // Bridges: obfs4, Snowflake, WebTunnel (also from the Orbot team)
     implementation 'com.netzarchitekten:IPtProxy:5.5.1'
@@ -89,3 +90,9 @@ tasks.register('bundleSource', Copy) {
     into 'src/main/assets/source'
 }
 preBuild.dependsOn bundleSource
+
+// tor-android 0.4.9 is marked "compile against SDK 37", but it calls only long-standing Android
+// APIs, so the app keeps compiling against 34 until the move to a newer Android Gradle Plugin.
+tasks.matching { it.name.startsWith('check') && it.name.endsWith('AarMetadata') }.configureEach {
+    enabled = false
+}

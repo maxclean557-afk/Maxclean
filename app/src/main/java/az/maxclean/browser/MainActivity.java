@@ -946,6 +946,7 @@ public class MainActivity extends Activity {
             showBanner("🧅 Подключаюсь к сети Tor" + how + "… обычно 10–60 секунд. "
                     + "Пока Tor не готов, ничего не загружается.", C_TOR);
             container.postDelayed(this::slowCheck, 60_000);
+            refreshHome();
         }
 
         private void slowCheck() {
@@ -994,7 +995,14 @@ public class MainActivity extends Activity {
     private void afterRouteChange() {
         flushPending();
         if (reloadWhenRouted && current != null) reloadCurrent();
+        else refreshHome();
         reloadWhenRouted = false;
+    }
+
+    /** The start page draws the Tor state when it loads, so it is redrawn on every change. */
+    private void refreshHome() {
+        String url = current != null ? current.view.getUrl() : null;
+        if (url != null && (url.startsWith(HOME) || url.equals("about:blank"))) load(HOME);
     }
 
     private void reloadCurrent() {
