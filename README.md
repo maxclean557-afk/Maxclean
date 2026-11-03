@@ -94,7 +94,7 @@ Maxclean Full для Windows: тот же интерфейс, Tor с моста�
    ```
 
    Обе версии подписаны им. Проверить можно командой `apksigner verify --print-certs Maxclean.apk` или приложением AppVerifier. Если сертификат другой, это не наша сборка.
-6. **Соберите сами** (нужны JDK 17+ и Android SDK):
+6. **Соберите сами** (нужны JDK 24+ и Android SDK):
 
    ```bash
    ./gradlew assembleLiteRelease assembleFullRelease
@@ -114,7 +114,7 @@ Maxclean Full для Windows: тот же интерфейс, Tor с моста�
 
 ## Используемые компоненты
 
-- [tor-android](https://github.com/guardianproject/tor-android) от Guardian Project (Tor 0.4.8)
+- [tor-android](https://github.com/guardianproject/tor-android) от Guardian Project (Tor 0.4.9)
 - [IPtProxy](https://github.com/tladesignz/IPtProxy) — мосты obfs4, Snowflake, WebTunnel (Lyrebird и Snowflake от Tor Project)
 - [AndroidX WebKit](https://developer.android.com/jetpack/androidx/releases/webkit)
 - Шрифт [Manrope](https://github.com/googlefonts/manrope) (только в Full) — лицензия SIL Open Font License, [`OFL.txt`](app/src/full/assets/fonts/OFL.txt)
