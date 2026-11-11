@@ -41,11 +41,28 @@ public final class Prefs {
     // Full edition: look and feel
     public static final String THEME = "theme";
     public static final String ACCENT = "accent";
+    public static final String ACCENT_CUSTOM = "accent_custom";
+    // Full edition: the start page (see HomeStyle)
+    public static final String HOME_SCENE = "home_scene";
+    public static final String HOME_GLOW = "home_glow";
+    public static final String HOME_GLOW1 = "home_glow1";
+    public static final String HOME_GLOW2 = "home_glow2";
+    public static final String HOME_BASE = "home_base";
+    public static final String HOME_BASE_CUSTOM = "home_base_custom";
+    public static final String HOME_CLOCK = "home_clock";
+    public static final String HOME_SEARCH = "home_search";
+    public static final String HOME_GLOBE = "home_globe";
+    public static final String HOME_DATE = "home_date";
+    public static final String HOME_TILES = "home_tiles";
+    // Updates
+    public static final String UPDATE_CHECK = "update_check";
+    public static final String UPDATE_LAST = "update_last";
     public static final String ICON = "icon";
     public static final String ANIMATIONS = "animations";
     public static final String QUICK_LINKS = "quick_links";
     public static final String ONBOARDED = "onboarded";
     public static final String FAKE_GEO = "fake_geo";
+    public static final String FAKE_TIMEZONE = "fake_timezone";
     public static final String FAKE_GEO_CUSTOM = "fake_geo_custom";
 
     /** Values of {@link #BRIDGES}. */

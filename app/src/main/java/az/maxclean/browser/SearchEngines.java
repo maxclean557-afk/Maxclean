@@ -40,6 +40,21 @@ public final class SearchEngines {
             null, // custom
     };
 
+    /**
+     * The order shown in the menu: private engines first, the ones that collect the most at the
+     * end. Saved choices are indexes into NAMES, so NAMES itself never changes order.
+     */
+    public static final int[] MENU_ORDER = {0, 1, 6, 7, 10, 9, 8, 2, 4, 5, 3, 11, 12, 13};
+
+    /** Shown after the name in the menu. */
+    public static String note(int engine) {
+        switch (engine) {
+            case 0: return "  — через .onion, без JavaScript";
+            case 2: case 3: case 11: case 12: return "  — собирает много данных";
+            default: return "";
+        }
+    }
+
     public static final int MAXCLEAN = 0;
     public static final int CUSTOM = NAMES.length - 1;
 
