@@ -99,10 +99,16 @@ public class MainActivity extends Activity {
     private boolean torFailed;
     private boolean reloadWhenRouted;
     private String networkSignature;
+    private int torSocksPort;
+    private Runnable bannerAction;
+    private boolean updating;
+    /** What the start page was last drawn with (Full), to redraw it after Settings. */
+    private String homeSignature;
     private final List<String> pendingLoads = new ArrayList<>();
     private String cosmeticCss = "";
     private String cookieCss = "";
     private String fingerprintJs = "";
+    private String timezoneJs = "";
     private static final long FP_SEED = new java.security.SecureRandom().nextInt() & 0xffffffffL;
 
     // ---------------------------------------------------------------- lifecycle
@@ -123,6 +129,7 @@ public class MainActivity extends Activity {
         cosmeticCss = readAsset("filters/cosmetic.css");
         cookieCss = readAsset("filters/cookie_banners.css");
         fingerprintJs = readAsset("fingerprint.js");
+        timezoneJs = readAsset("timezone.js");
         buildUi();
         Wiper.wipeShared(this);
 
@@ -176,6 +183,11 @@ public class MainActivity extends Activity {
         blocker.refresh(this);
         for (Tab t : tabs) configure(t);
         updateEngineButton();
+        if (BuildConfig.FULL) {
+            String look = HomeStyle.signature(this);
+            if (homeSignature != null && !look.equals(homeSignature)) refreshHome();
+            homeSignature = look;
+        }
         String sig = Prefs.networkSignature(this);
         if (!sig.equals(networkSignature)) {
             // Tor, bridges or the proxy changed in Settings: set the route up again.
@@ -468,6 +480,8 @@ public class MainActivity extends Activity {
                 {"↻   Обновить", (Runnable) this::reloadCurrent},
                 {"→   Вперёд", (Runnable) () -> { if (current.view.canGoForward()) current.view.goForward(); }},
                 {"✕   Закрыть вкладку (стереть)", (Runnable) () -> closeTab(current)},
+                {"🌐  Перевести страницу", (Runnable) this::translatePage},
+                {"⬆   Проверить обновления", (Runnable) () -> checkUpdates(true)},
                 {"🔍  Проверка утечек", (Runnable) this::showLeakTests},
                 {"⚙   Настройки", (Runnable) () -> openScreen(SettingsActivity.class)},
                 {"</>  Код браузера", (Runnable) () -> openScreen(CodeActivity.class)},
@@ -830,7 +844,14 @@ public class MainActivity extends Activity {
         torPulse.start();
     }
 
+    /** A banner that does something when tapped: download an update, install it, retry. */
+    private void showBannerAction(String text, int color, Runnable action) {
+        showBanner(text, color);
+        bannerAction = action;
+    }
+
     private void showBanner(String text, int color) {
+        bannerAction = null;
         boolean wasHidden = banner.getVisibility() != View.VISIBLE;
         banner.setText(text);
         if (banner.getBackground() instanceof GradientDrawable) {
@@ -905,6 +926,13 @@ public class MainActivity extends Activity {
     }
 
     private void onBannerClick() {
+        if (bannerAction != null) {
+            Runnable a = bannerAction;
+            bannerAction = null;
+            hideBanner();
+            a.run();
+            return;
+        }
         if (torEnabled && !torReady && torFailed) {
             applyTor(true); // retry
             return;
@@ -963,10 +991,12 @@ public class MainActivity extends Activity {
         @Override
         public void onReady(int socksPort) {
             torReady = true;
+            torSocksPort = socksPort;
             torFailed = false;
             showBanner("🧅 Tor подключён: провайдер не видит, куда вы ходите", C_TOR);
-            container.postDelayed(() -> { if (torReady) hideBanner(); }, 2500);
+            container.postDelayed(() -> { if (torReady && bannerAction == null) hideBanner(); }, 2500);
             afterRouteChange();
+            afterTorReady();
         }
 
         @Override
@@ -1007,7 +1037,7 @@ public class MainActivity extends Activity {
 
     private void reloadCurrent() {
         String url = current.view.getUrl();
-        if (url == null || url.startsWith(HOME)) {
+        if (url == null || url.startsWith(HOME) || url.equals("about:blank")) {
             load(HOME); // the home page shows the Tor state
         } else {
             current.view.reload();
@@ -1162,6 +1192,9 @@ public class MainActivity extends Activity {
                     .append(")(").append(FP_SEED).append(",").append(Disguise.profileJs(this))
                     .append(");}catch(e){}");
         }
+        if (Prefs.on(this, Prefs.FAKE_TIMEZONE) && !timezoneJs.isEmpty()) {
+            js.append("try{(").append(timezoneJs.trim().replaceAll("^(//[^\\n]*\\n)+", "")).append(")();}catch(e){}");
+        }
         js.append(Disguise.geoJs(this));
         if (Prefs.on(this, Prefs.GPC)) {
             js.append("try{Object.defineProperty(navigator,'globalPrivacyControl',{value:true});"
@@ -1299,15 +1332,21 @@ public class MainActivity extends Activity {
         String torText = !torEnabled ? "Tor выключен — нажмите 🧅"
                 : !torReady ? "Подключаюсь к Tor…"
                 : "Tor включён · 3 узла" + (bridges ? " · мосты" : "");
+        // Read the look afresh each time, so a change in Settings shows without a restart.
+        Palette look = Palette.of(this);
+        HomeStyle hs = HomeStyle.of(this, look);
         return tpl.replace("{{FONT}}", fontDataUri)
-                .replace("{{BG}}", Palette.hex(C_BG)).replace("{{TEXT}}", Palette.hex(C_TEXT))
-                .replace("{{MUTED}}", Palette.hex(C_MUTED)).replace("{{ACCENT}}", Palette.hex(C_ACCENT))
+                .replace("{{BG}}", Palette.hex(hs.base)).replace("{{TEXT}}", Palette.hex(hs.text))
+                .replace("{{MUTED}}", Palette.hex(hs.muted)).replace("{{ACCENT}}", Palette.hex(look.accent))
                 .replace("{{TOR}}", Palette.hex(C_TOR))
-                .replace("{{GLASS}}", pal.dark ? "rgba(255,255,255,.07)" : "rgba(255,255,255,.62)")
-                .replace("{{LINE}}", pal.dark ? "rgba(255,255,255,.12)" : "rgba(20,23,28,.09)")
+                .replace("{{C1}}", Palette.hex(hs.glow1)).replace("{{C2}}", Palette.hex(hs.glow2))
+                .replace("{{BODY}}", hs.bodyClasses())
+                .replace("{{GLASS}}", hs.dark ? "rgba(255,255,255,.07)" : "rgba(255,255,255,.62)")
+                .replace("{{LINE}}", hs.dark ? "rgba(255,255,255,.12)" : "rgba(20,23,28,.09)")
                 .replace("{{TORCLASS}}", torEnabled && torReady ? "on" : "")
                 .replace("{{TORTEXT}}", torText)
                 .replace("{{TORON}}", torEnabled && torReady ? "true" : "false")
+                .replace("{{TZOFF}}", String.valueOf(java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60000))
                 .replace("{{TIME}}", new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(now))
                 .replace("{{DATE}}", new java.text.SimpleDateFormat("EEEE, d MMMM", new java.util.Locale("ru")).format(now))
                 .replace("{{TILES}}", tiles.toString());
@@ -1500,6 +1539,8 @@ public class MainActivity extends Activity {
         m.getMenu().add(0, 6, 0, "🔎 Поисковик…");
         m.getMenu().add(0, 7, 0, "⚙ Настройки");
         m.getMenu().add(0, 8, 0, "</> Код браузера");
+        m.getMenu().add(0, 11, 0, "🌐 Перевести страницу");
+        m.getMenu().add(0, 12, 0, "⬆ Проверить обновления");
         m.getMenu().add(0, 10, 0, "🔍 Проверка утечек");
         m.getMenu().add(0, 9, 0, "🔥 Стереть всё и выйти");
         m.setOnMenuItemClickListener(item -> {
@@ -1514,6 +1555,8 @@ public class MainActivity extends Activity {
                 case 8: openScreen(CodeActivity.class); break;
                 case 9: wipeAndExit(); break;
                 case 10: showLeakTests(); break;
+                case 11: translatePage(); break;
+                case 12: checkUpdates(true); break;
             }
             return true;
         });
@@ -1526,10 +1569,18 @@ public class MainActivity extends Activity {
     }
 
     private void chooseEngine() {
-        int selected = Prefs.get(this).getInt(Prefs.ENGINE, SearchEngines.MAXCLEAN);
+        int saved = Prefs.get(this).getInt(Prefs.ENGINE, SearchEngines.MAXCLEAN);
+        int[] order = SearchEngines.MENU_ORDER;
+        String[] names = new String[order.length];
+        int selected = 0;
+        for (int i = 0; i < order.length; i++) {
+            names[i] = SearchEngines.NAMES[order[i]] + SearchEngines.note(order[i]);
+            if (order[i] == saved) selected = i;
+        }
         new AlertDialog.Builder(this)
                 .setTitle("Искать через")
-                .setSingleChoiceItems(SearchEngines.NAMES, selected, (d, which) -> {
+                .setSingleChoiceItems(names, selected, (d, pos) -> {
+                    int which = order[pos];
                     if (which == SearchEngines.CUSTOM
                             && !Prefs.get(this).getString(Prefs.CUSTOM_ENGINE, "").contains("%s")) {
                         Toast.makeText(this, "Сначала задайте свой поисковик в Настройках",
@@ -1541,6 +1592,108 @@ public class MainActivity extends Activity {
                     String text = urlBar.getText().toString().trim();
                     if (!text.isEmpty() && !text.contains("://")) submit(text);
                 })
+                .show();
+    }
+
+    // ---------------------------------------------------------------- updates
+
+    /** Once Tor is up: is its own version still fine for the network, and is there a new Maxclean? */
+    private void afterTorReady() {
+        new Thread(() -> {
+            // Tor compares itself with what the network recommends: "recommended", "old",
+            // "unrecommended", "obsolete"… The last two mean it may soon stop connecting.
+            String s = tor.torInfo("status/version/current");
+            android.util.Log.i("Maxclean", "Tor version status: " + s);
+            s = s == null ? "" : s.trim();
+            long warned = Prefs.get(this).getLong("tor_old_warned", 0);
+            if ((s.equals("obsolete") || s.equals("unrecommended"))
+                    && System.currentTimeMillis() - warned > 24L * 3600 * 1000) {
+                Prefs.get(this).edit().putLong("tor_old_warned", System.currentTimeMillis()).apply();
+                runOnUiThread(() -> showBannerAction("⚠ Сеть Tor считает встроенную версию Tor устаревшей. "
+                        + "Сейчас всё работает, но со временем может перестать. Нажмите, чтобы проверить "
+                        + "обновление Maxclean.", C_WARN, () -> checkUpdates(true)));
+            }
+        }).start();
+        if (UpdateChecker.due(this)) container.postDelayed(() -> checkUpdates(false), 4000);
+    }
+
+    private void checkUpdates(boolean manual) {
+        if (!torEnabled || !torReady || torSocksPort <= 0) {
+            if (manual) Toast.makeText(this, "Обновления проверяются только через Tor — включите его",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (manual) Toast.makeText(this, "Проверяю обновления через Tor…", Toast.LENGTH_SHORT).show();
+        UpdateChecker.check(this, torSocksPort, (r, error) -> {
+            android.util.Log.i("Maxclean", "Update check: " + (r != null ? "new " + r.version : error != null ? "error " + error : "up to date"));
+            if (r != null) {
+                showBannerAction("⬆ Вышел Maxclean " + r.version + ". Нажмите, чтобы скачать через Tor "
+                        + "и установить — с проверкой подписи.", C_TOR, () -> downloadUpdate(r));
+            } else if (manual) {
+                Toast.makeText(this, error != null ? "Не удалось проверить: " + error
+                        : "У вас последняя версия: " + BuildConfig.VERSION_NAME, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void downloadUpdate(UpdateChecker.Release r) {
+        if (updating) return;
+        updating = true;
+        String what = "⬇ Скачиваю Maxclean " + r.version + " через Tor…";
+        showBanner(what, C_TOR);
+        UpdateChecker.download(this, r, torSocksPort,
+                p -> { if (p >= 0 && bannerAction == null) banner.setText(what + " " + p + "%"); },
+                (apk, error) -> {
+                    updating = false;
+                    if (apk == null) {
+                        showBannerAction("Обновление не установлено: " + error + ". Нажмите, чтобы попробовать снова.",
+                                C_WARN, () -> downloadUpdate(r));
+                        return;
+                    }
+                    showBannerAction("✓ Подпись совпадает с официальной. Нажмите, чтобы установить Maxclean "
+                            + r.version + ".", C_TOR, () -> installUpdate(apk));
+                    installUpdate(apk);
+                });
+    }
+
+    private void installUpdate(java.io.File apk) {
+        if (!getPackageManager().canRequestPackageInstalls()) {
+            Toast.makeText(this, "Разрешите Maxclean устанавливать обновления и нажмите на баннер ещё раз",
+                    Toast.LENGTH_LONG).show();
+            startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + getPackageName())));
+            showBannerAction("Нажмите, чтобы установить обновление", C_TOR, () -> installUpdate(apk));
+            return;
+        }
+        UpdateChecker.install(this, apk);
+    }
+
+    /**
+     * Translates the open page into Russian with Google Translate's page proxy. Through Tor it
+     * learns the page address but not who asked; the user is told once before it happens.
+     */
+    private void translatePage() {
+        String url = current != null ? current.view.getUrl() : null;
+        if (url == null || !(url.startsWith("http://") || url.startsWith("https://"))) {
+            Toast.makeText(this, "Откройте сайт, который нужно перевести", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (url.contains(".translate.goog/") || url.contains("translate.google.")) return;
+        String target = "https://translate.google.com/translate?sl=auto&tl=ru&u=" + Uri.encode(url);
+        if (Prefs.get(this).getBoolean("translate_told", false)) {
+            load(target);
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Перевести страницу")
+                .setMessage("Страница откроется через Google Переводчик: Google увидит её адрес и текст. "
+                        + (torEnabled ? "Через Tor он не узнает, кто вы." : "Tor выключен — Google увидит и ваш IP.")
+                        + "\n\nНе переводите так страницы с личными данными.")
+                .setPositiveButton("Перевести", (d, w) -> {
+                    Prefs.get(this).edit().putBoolean("translate_told", true).apply();
+                    load(target);
+                })
+                .setNegativeButton("Отмена", null)
                 .show();
     }
 

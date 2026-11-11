@@ -124,6 +124,17 @@ public final class TorProxy {
         return ready;
     }
 
+    /** A GETINFO answer from the running Tor, or null. Call off the main thread. */
+    public String torInfo(String key) {
+        TorService s = service;
+        if (s == null) return null;
+        try {
+            return s.getInfo(key);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     /**
      * Asks Tor itself once a second whether it has a circuit, rather than rely only on the ON
      * broadcast: it can come before we listen, or (tor-android 0.4.9) not at all.
