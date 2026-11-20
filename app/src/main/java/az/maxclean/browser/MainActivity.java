@@ -109,6 +109,7 @@ public class MainActivity extends Activity {
     private String cookieCss = "";
     private String fingerprintJs = "";
     private String timezoneJs = "";
+    private String keepVisibleJs = "";
     private static final long FP_SEED = new java.security.SecureRandom().nextInt() & 0xffffffffL;
 
     // ---------------------------------------------------------------- lifecycle
@@ -130,6 +131,7 @@ public class MainActivity extends Activity {
         cookieCss = readAsset("filters/cookie_banners.css");
         fingerprintJs = readAsset("fingerprint.js");
         timezoneJs = readAsset("timezone.js");
+        keepVisibleJs = readAsset("keep_visible.js");
         buildUi();
         Wiper.wipeShared(this);
 
@@ -138,6 +140,7 @@ public class MainActivity extends Activity {
         networkSignature = Prefs.networkSignature(this);
         applyTor(false);
         newTab(urlFromIntent(getIntent()));
+        fromWidget(getIntent(), true);
         warnIfWebViewOutdated();
     }
 
@@ -169,17 +172,44 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         String url = urlFromIntent(intent);
         if (url != null) newTab(url);
+        fromWidget(intent, false);
+    }
+
+    /** The home screen widget: open ready to type, in a new tab when "+" was tapped. */
+    private void fromWidget(Intent intent, boolean justStarted) {
+        if (intent == null || urlBar == null) return;
+        String a = intent.getAction();
+        if (SearchWidget.ACTION_NEW_TAB.equals(a) && !justStarted) newTab(null);
+        if (!SearchWidget.ACTION_SEARCH.equals(a) && !SearchWidget.ACTION_NEW_TAB.equals(a)) return;
+        // Opened only for this purpose: don't act on it again after a rotation or restart.
+        intent.setAction(null);
+        urlBar.postDelayed(() -> {
+            urlBar.requestFocus();
+            urlBar.selectAll();
+            android.view.inputmethod.InputMethodManager imm =
+                    (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (imm != null) imm.showSoftInput(urlBar, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        }, justStarted ? 900 : 250);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // Still allowed to start a foreground service here; after onStop Android may refuse.
+        PlaybackService.startIfPlaying(this);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        PlaybackService.stop(this);
         if (Prefs.on(this, Prefs.NO_SCREENSHOTS)) {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         } else {
             getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
         }
         // Settings may have changed while we were away.
+        if (barView != null) placeBar();
         blocker.refresh(this);
         for (Tab t : tabs) configure(t);
         updateEngineButton();
@@ -199,6 +229,10 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (fullView != null) {
+            exitFullscreen();
+            return;
+        }
         if (closeOverlay != null) {
             closeOverlay.run();
             return;
@@ -214,6 +248,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        PlaybackService.stop(this);
         for (Tab t : new ArrayList<>(tabs)) destroyTab(t);
         Wiper.wipeShared(this);
         tor.release();
@@ -221,6 +256,59 @@ public class MainActivity extends Activity {
         if (isFinishing()) {
             // Kill the process so nothing stays in RAM either.
             Process.killProcess(Process.myPid());
+        }
+    }
+
+    // ---------------------------------------------------------------- video full screen
+
+    private View fullView;
+    private WebChromeClient.CustomViewCallback fullCallback;
+    private int orientationBeforeFull;
+
+    /** A page asked for full screen (the player's full-screen button): show its view over everything. */
+    private void enterFullscreen(View view, WebChromeClient.CustomViewCallback callback) {
+        if (fullView != null) {
+            callback.onCustomViewHidden();
+            return;
+        }
+        fullView = view;
+        fullCallback = callback;
+        view.setBackgroundColor(Color.BLACK);
+        appFrame.addView(view, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        orientationBeforeFull = getRequestedOrientation();
+        // Videos are mostly wide: turn with the phone between the two landscape sides.
+        setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+        setSystemBars(false);
+    }
+
+    private void exitFullscreen() {
+        if (fullView == null) return;
+        appFrame.removeView(fullView);
+        fullView = null;
+        setSystemBars(true);
+        setRequestedOrientation(orientationBeforeFull);
+        WebChromeClient.CustomViewCallback cb = fullCallback;
+        fullCallback = null;
+        if (cb != null) cb.onCustomViewHidden();
+    }
+
+    private void setSystemBars(boolean show) {
+        android.view.Window w = getWindow();
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            w.setDecorFitsSystemWindows(show);
+            android.view.WindowInsetsController c = w.getInsetsController();
+            if (c == null) return;
+            if (show) {
+                c.show(android.view.WindowInsets.Type.systemBars());
+            } else {
+                c.hide(android.view.WindowInsets.Type.systemBars());
+                c.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            w.getDecorView().setSystemUiVisibility(show ? 0
+                    : View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
         }
     }
 
@@ -246,8 +334,51 @@ public class MainActivity extends Activity {
         return b;
     }
 
+    private LinearLayout rootLayout, barView, fullCard;
+    private FrameLayout.LayoutParams pageLp, fullCardLp, fullBannerLp;
+    private Boolean barTopApplied;
+
+    /** Puts the address bar (with its progress line) at the top or the bottom, as set in Settings. */
+    private void placeBar() {
+        boolean top = Prefs.barTop(this);
+        if (barTopApplied != null && barTopApplied == top) return;
+        barTopApplied = top;
+        if (fullCard != null) {
+            fullCard.removeAllViews();
+            // The loading line sits on the edge of the card that faces the page.
+            if (!top) fullCard.addView(progress, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2)));
+            fullCard.addView(barView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
+            if (top) fullCard.addView(progress, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2)));
+            fullCardLp.gravity = top ? Gravity.TOP : Gravity.BOTTOM;
+            fullCardLp.setMargins(dp(12), top ? dp(12) : 0, dp(12), top ? 0 : dp(12));
+            pageLp.topMargin = top ? dp(84) : 0;
+            pageLp.bottomMargin = top ? 0 : dp(84);
+            // Banners appear on the other side, so they never cover the bar.
+            fullBannerLp.gravity = top ? Gravity.BOTTOM : Gravity.TOP;
+            fullBannerLp.setMargins(dp(12), top ? 0 : dp(12), dp(12), top ? dp(12) : 0);
+            fullCard.setLayoutParams(fullCardLp);
+            container.setLayoutParams(pageLp);
+            banner.setLayoutParams(fullBannerLp);
+        } else {
+            rootLayout.removeView(barView);
+            rootLayout.removeView(progress);
+            rootLayout.removeView(banner);
+            rootLayout.removeView(container);
+            LinearLayout.LayoutParams line = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3));
+            LinearLayout.LayoutParams page = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1);
+            if (top) {
+                rootLayout.addView(barView); rootLayout.addView(progress, line);
+                rootLayout.addView(banner); rootLayout.addView(container, page);
+            } else {
+                rootLayout.addView(banner); rootLayout.addView(container, page);
+                rootLayout.addView(progress, line); rootLayout.addView(barView);
+            }
+        }
+    }
+
     private void buildUi() {
         LinearLayout root = new LinearLayout(this);
+        rootLayout = root;
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(C_BG);
 
@@ -335,7 +466,9 @@ public class MainActivity extends Activity {
         container = new FrameLayout(this);
         root.addView(container, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
 
+        barView = bar;
         View content = BuildConfig.FULL ? fullLayout(root, bar) : root;
+        placeBar();
         appFrame = new FrameLayout(this);
         appFrame.addView(content);
         if (Palette.animations(this) && !splashShown) {
@@ -476,7 +609,13 @@ public class MainActivity extends Activity {
         }
         panel.addView(tiles);
 
-        Object[][] rows = {
+        java.util.List<Object[]> rowList = new java.util.ArrayList<>();
+        if (!Prefs.on(this, Prefs.JAVASCRIPT) && current != null && JsSites.siteOf(current.view.getUrl()) != null) {
+            rowList.add(new Object[]{JsSites.allowed(this, current.view.getUrl())
+                    ? "⚡  Запретить JavaScript этому сайту" : "⚡  Разрешить JavaScript этому сайту",
+                    (Runnable) this::toggleSiteJs});
+        }
+        Object[][] rows0 = {
                 {"↻   Обновить", (Runnable) this::reloadCurrent},
                 {"→   Вперёд", (Runnable) () -> { if (current.view.canGoForward()) current.view.goForward(); }},
                 {"✕   Закрыть вкладку (стереть)", (Runnable) () -> closeTab(current)},
@@ -486,6 +625,8 @@ public class MainActivity extends Activity {
                 {"⚙   Настройки", (Runnable) () -> openScreen(SettingsActivity.class)},
                 {"</>  Код браузера", (Runnable) () -> openScreen(CodeActivity.class)},
         };
+        java.util.Collections.addAll(rowList, rows0);
+        Object[][] rows = rowList.toArray(new Object[0][]);
         View gap = new View(this);
         panel.addView(gap, new LinearLayout.LayoutParams(1, dp(12)));
         TypedValue ripple = new TypedValue();
@@ -757,12 +898,13 @@ public class MainActivity extends Activity {
         FrameLayout frame = new FrameLayout(this);
         frame.setBackgroundColor(C_BG);
 
-        FrameLayout.LayoutParams pageLp = new FrameLayout.LayoutParams(
+        pageLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
         pageLp.bottomMargin = dp(84);
         frame.addView(container, pageLp);
 
         LinearLayout card = new LinearLayout(this);
+        fullCard = card;
         card.setOrientation(LinearLayout.VERTICAL);
         GradientDrawable cardBg = new GradientDrawable();
         cardBg.setColor(C_PANEL);
@@ -776,7 +918,7 @@ public class MainActivity extends Activity {
         progress.setVisibility(View.INVISIBLE);
         card.addView(progress, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2)));
         card.addView(bar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
-        FrameLayout.LayoutParams cardLp = new FrameLayout.LayoutParams(
+        FrameLayout.LayoutParams cardLp = fullCardLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
         cardLp.setMargins(dp(12), 0, dp(12), dp(12));
         frame.addView(card, cardLp);
@@ -786,7 +928,7 @@ public class MainActivity extends Activity {
         banner.setBackground(bannerBg);
         banner.setElevation(dp(10));
         banner.setPadding(dp(16), dp(12), dp(16), dp(12));
-        FrameLayout.LayoutParams bannerLp = new FrameLayout.LayoutParams(
+        FrameLayout.LayoutParams bannerLp = fullBannerLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP);
         bannerLp.setMargins(dp(12), dp(12), dp(12), 0);
         frame.addView(banner, bannerLp);
@@ -902,13 +1044,21 @@ public class MainActivity extends Activity {
         name.setTextSize(30);
         name.setTypeface(Typeface.DEFAULT_BOLD);
         name.setLetterSpacing(0.04f);
-        splash.addView(name);
+        // Full width and centred text: centring the views alone left the text at the left edge
+        // on some phones once the Full font was applied.
+        name.setGravity(Gravity.CENTER_HORIZONTAL);
+        name.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+        splash.addView(name, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
         TextView tag = new TextView(this);
         tag.setText("анонимность без следов");
         tag.setTextColor(C_MUTED);
         tag.setTextSize(14);
         tag.setPadding(0, dp(6), 0, 0);
-        splash.addView(tag);
+        tag.setGravity(Gravity.CENTER_HORIZONTAL);
+        tag.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+        splash.addView(tag, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
 
         logo.setScaleX(0.4f);
         logo.setScaleY(0.4f);
@@ -1128,7 +1278,7 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------------- WebView
 
     private WebView createWebView(Tab tab) {
-        WebView w = new WebView(this);
+        WebView w = new TabView(this);
         w.setBackgroundColor(C_BG);
         w.setWebViewClient(new Client(tab));
         w.setWebChromeClient(new Chrome(tab));
@@ -1144,7 +1294,8 @@ public class MainActivity extends Activity {
     private void configure(Tab tab) {
         WebView w = tab.view;
         WebSettings s = w.getSettings();
-        s.setJavaScriptEnabled(Prefs.on(this, Prefs.JAVASCRIPT));
+        // Off globally, but on for sites in the JavaScript list (JsSites).
+        s.setJavaScriptEnabled(JsSites.jsFor(this, w.getUrl()));
         s.setDomStorageEnabled(true); // lives for the session only, wiped on close
         s.setGeolocationEnabled(false);
         s.setAllowFileAccess(false);
@@ -1194,6 +1345,10 @@ public class MainActivity extends Activity {
         }
         if (Prefs.on(this, Prefs.FAKE_TIMEZONE) && !timezoneJs.isEmpty()) {
             js.append("try{(").append(timezoneJs.trim().replaceAll("^(//[^\\n]*\\n)+", "")).append(")();}catch(e){}");
+        }
+        if (Prefs.on(this, Prefs.KEEP_VISIBLE) && !keepVisibleJs.isEmpty()) {
+            // Off by default: the tab always looks visible and focused to the page (assets/keep_visible.js).
+            js.append("try{(").append(keepVisibleJs.trim().replaceAll("^(//[^\\n]*\\n)+", "")).append(")();}catch(e){}");
         }
         js.append(Disguise.geoJs(this));
         if (Prefs.on(this, Prefs.GPC)) {
@@ -1249,6 +1404,33 @@ public class MainActivity extends Activity {
         return h;
     }
 
+    /** Turns JavaScript on or off for the page about to load at this address. True if it changed. */
+    private boolean applyJs(WebView view, String url) {
+        // Only web pages: the start page and about:/data: pages keep whatever is set.
+        if (JsSites.siteOf(url) == null) return false;
+        boolean want = JsSites.jsFor(this, url);
+        WebSettings s = view.getSettings();
+        if (s.getJavaScriptEnabled() == want) return false;
+        s.setJavaScriptEnabled(want);
+        return true;
+    }
+
+    /** Menu: allow or forbid JavaScript for the open site while it is off everywhere else. */
+    private void toggleSiteJs() {
+        if (current == null) return;
+        String url = current.view.getUrl();
+        String site = JsSites.siteOf(url);
+        if (site == null) {
+            Toast.makeText(this, "Откройте сайт, чтобы разрешить ему JavaScript", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        boolean on = JsSites.toggle(this, url);
+        Toast.makeText(this, (on ? "JavaScript разрешён для " : "JavaScript запрещён для ") + site,
+                Toast.LENGTH_SHORT).show();
+        applyJs(current.view, url);
+        current.view.reload();
+    }
+
     private void load(String url) {
         if (current == null) return;
         if (HOME.equals(url)) {
@@ -1268,6 +1450,7 @@ public class MainActivity extends Activity {
                 && !u.getHost().endsWith(".onion") && Prefs.on(this, Prefs.HTTPS_ONLY)) {
             url = u.buildUpon().scheme("https").build().toString();
         }
+        applyJs(current.view, url);
         current.view.loadUrl(url, privacyHeaders());
     }
 
@@ -1429,8 +1612,13 @@ public class MainActivity extends Activity {
             String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase();
             if (scheme.equals("http") && Prefs.on(MainActivity.this, Prefs.HTTPS_ONLY)
                     && uri.getHost() != null && !uri.getHost().endsWith(".onion")) {
-                view.loadUrl(uri.buildUpon().scheme("https").build().toString(), privacyHeaders());
+                String https = uri.buildUpon().scheme("https").build().toString();
+                if (request.isForMainFrame()) applyJs(view, https);
+                view.loadUrl(https, privacyHeaders());
                 return true;
+            }
+            if (request.isForMainFrame() && (scheme.equals("http") || scheme.equals("https"))) {
+                applyJs(view, uri.toString());
             }
             if (scheme.equals("http") || scheme.equals("https") || scheme.equals("about")
                     || scheme.equals("data") || scheme.equals("blob") || scheme.equals("javascript")) {
@@ -1450,6 +1638,12 @@ public class MainActivity extends Activity {
 
         @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
+            // Back, forward and redirects skip load(): if this site needs the other JavaScript
+            // setting, switch it and load the page again (the change applies to the next document).
+            if (applyJs(view, url)) {
+                view.reload();
+                return;
+            }
             if (tab == current) showUrl(url);
         }
 
@@ -1478,6 +1672,16 @@ public class MainActivity extends Activity {
             if (tab != current) return;
             progress.setProgress(p, Palette.animations(MainActivity.this));
             progress.setVisibility(p >= 100 ? (BuildConfig.FULL ? View.INVISIBLE : View.GONE) : View.VISIBLE);
+        }
+
+        @Override
+        public void onShowCustomView(View view, CustomViewCallback callback) {
+            enterFullscreen(view, callback);
+        }
+
+        @Override
+        public void onHideCustomView() {
+            exitFullscreen();
         }
 
         @Override
@@ -1542,6 +1746,10 @@ public class MainActivity extends Activity {
         m.getMenu().add(0, 11, 0, "🌐 Перевести страницу");
         m.getMenu().add(0, 12, 0, "⬆ Проверить обновления");
         m.getMenu().add(0, 10, 0, "🔍 Проверка утечек");
+        if (!Prefs.on(this, Prefs.JAVASCRIPT) && current != null && JsSites.siteOf(current.view.getUrl()) != null) {
+            m.getMenu().add(0, 13, 0, JsSites.allowed(this, current.view.getUrl())
+                    ? "⚡ Запретить JavaScript этому сайту" : "⚡ Разрешить JavaScript этому сайту");
+        }
         m.getMenu().add(0, 9, 0, "🔥 Стереть всё и выйти");
         m.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
@@ -1557,6 +1765,7 @@ public class MainActivity extends Activity {
                 case 10: showLeakTests(); break;
                 case 11: translatePage(); break;
                 case 12: checkUpdates(true); break;
+                case 13: toggleSiteJs(); break;
             }
             return true;
         });

@@ -7,6 +7,10 @@
     <!-- Updates: open Android's installer for a new Maxclean, only after its signature is checked
          and only when the user taps it. Android asks the user to allow this once. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- "Фоновая активность вкладок": keep a page's sound playing while the browser is in the
+         background, with a "Звук играет в фоне" notification. Only while sound is playing. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
 
     <application
@@ -44,6 +48,14 @@
         </activity>
 
         <activity android:name=".SettingsActivity" android:label="Настройки" />
+        <receiver android:name=".SearchWidget" android:exported="false" android:label="Поиск Maxclean">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_search_info" />
+        </receiver>
+        <service android:name=".PlaybackService" android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
         <activity android:name=".CodeActivity" android:label="Код браузера"
             android:windowSoftInputMode="adjustResize" />
         <provider

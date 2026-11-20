@@ -47,6 +47,7 @@ public class SettingsActivity extends Activity {
         scroll.post(() -> Palette.applyFont(this, scroll));
 
         title(BuildConfig.FULL ? "Настройки Maxclean Full" : "Настройки Maxclean");
+        hint("Версия " + BuildConfig.VERSION_NAME);
 
         header("⚡ Режим защиты");
         boolean max = !Prefs.on(this, Prefs.JAVASCRIPT) && !Prefs.on(this, Prefs.COOKIES);
@@ -61,6 +62,11 @@ public class SettingsActivity extends Activity {
         presets.addView(presetButton("↺ Обычный", false, !max),
                 new LinearLayout.LayoutParams(0, dp(48), 1));
         list.addView(presets);
+
+        header("📐 Строка адреса");
+        choice(Prefs.BAR_POSITION, BuildConfig.FULL ? "bottom" : "top", new String[][]{
+                {"bottom", "Снизу", "Удобно тянуться большим пальцем"},
+                {"top", "Сверху", "Как в Chrome и большинстве браузеров"}});
 
         if (BuildConfig.FULL) {
             header("🎨 Оформление");
@@ -180,6 +186,10 @@ public class SettingsActivity extends Activity {
         toggle(Prefs.COOKIES, "Разрешить cookies", "Нужны для входа на сайты. Стираются при закрытии вкладки");
         toggle(Prefs.THIRD_PARTY_COOKIES, "Сторонние cookies", "Обычно используются только для слежки");
         toggle(Prefs.JAVASCRIPT, "JavaScript", "Без него безопаснее, но многие сайты сломаются");
+        multiline(Prefs.JS_SITES, "Сайты, где JavaScript разрешён",
+                "Работает, когда JavaScript выше выключен. По одному сайту в строке, поддомены входят. "
+                        + "Добавить открытый сайт: меню → «Разрешить JavaScript этому сайту»",
+                "youtube.com\nweb.telegram.org");
         toggle(Prefs.DISABLE_WEBRTC, "Отключить WebRTC", "Иначе сайт может узнать ваш настоящий IP даже через Tor");
         toggle(Prefs.FAKE_TIMEZONE, "Часовой пояс UTC",
                 "Сайты не узнают ваш пояс, как в Tor Browser. Время на сайтах будет по UTC");
@@ -187,6 +197,11 @@ public class SettingsActivity extends Activity {
         toggle(Prefs.GPC, "Сигнал «Не отслеживать» (GPC/DNT)", "Законный запрет продавать ваши данные");
         toggle(Prefs.HTTPS_ONLY, "Только HTTPS", "Ссылки http:// открываются как https://");
         toggle(Prefs.NO_SCREENSHOTS, "Запретить скриншоты", "И скрыть превью в списке приложений");
+
+        header("▶ Фон");
+        toggle(Prefs.KEEP_VISIBLE, "Фоновая активность вкладок",
+                "Сайты считают вкладку открытой, даже когда открыта шторка или другое окно: видео, музыка "
+                        + "и веб-приложения не останавливаются. Выключается в режиме «Максимальная защита»");
 
         header("⬆ Обновления");
         toggle(Prefs.UPDATE_CHECK, "Проверять обновления",
@@ -311,7 +326,8 @@ public class SettingsActivity extends Activity {
                     Prefs.GENERIC_UA, Prefs.GPC, Prefs.HTTPS_ONLY, Prefs.NO_SCREENSHOTS}) {
                 e.putBoolean(k, true);
             }
-            e.putBoolean(Prefs.THIRD_PARTY_COOKIES, false).putBoolean(Prefs.USER_SCRIPT_ON, false);
+            e.putBoolean(Prefs.THIRD_PARTY_COOKIES, false).putBoolean(Prefs.USER_SCRIPT_ON, false)
+                    .putBoolean(Prefs.KEEP_VISIBLE, false);
             e.putString(Prefs.FAKE_GEO, "off").putString(Prefs.DEVICE_PROFILE, "generic");
         }
         e.apply();

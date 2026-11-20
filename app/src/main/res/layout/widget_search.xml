@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Home screen search bar: shield, "Поиск", and a new-tab button. No microphone: voice
+     recognition on most phones goes through Google, which Maxclean avoids. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="56dp"
+    android:layout_gravity="center"
+    android:background="@drawable/widget_bg"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="6dp"
+    android:paddingEnd="8dp">
+
+    <ImageView
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:contentDescription="Maxclean"
+        android:scaleType="centerCrop"
+        android:src="@drawable/ic_launcher_fg" />
+
+    <TextView
+        android:id="@+id/widget_search"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:paddingStart="4dp"
+        android:singleLine="true"
+        android:text="Поиск в Maxclean"
+        android:textColor="#B3EAEFF5"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/widget_new_tab"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:background="@drawable/widget_btn_bg"
+        android:contentDescription="Новая вкладка"
+        android:gravity="center"
+        android:text="+"
+        android:textColor="#2BD4A4"
+        android:textSize="24sp" />
+</LinearLayout>

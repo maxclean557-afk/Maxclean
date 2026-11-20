@@ -63,6 +63,15 @@ public final class Prefs {
     public static final String ONBOARDED = "onboarded";
     public static final String FAKE_GEO = "fake_geo";
     public static final String FAKE_TIMEZONE = "fake_timezone";
+    public static final String KEEP_VISIBLE = "keep_visible";
+    /** Sites allowed to run JavaScript while it is off, one domain per line (see JsSites). */
+    public static final String JS_SITES = "js_sites";
+    /** Where the address bar sits: "top" or "bottom" (Full starts at the bottom, Lite at the top). */
+    public static final String BAR_POSITION = "bar_position";
+
+    public static boolean barTop(Context c) {
+        return "top".equals(str(c, BAR_POSITION, BuildConfig.FULL ? "bottom" : "top"));
+    }
     public static final String FAKE_GEO_CUSTOM = "fake_geo_custom";
 
     /** Values of {@link #BRIDGES}. */
@@ -98,6 +107,7 @@ public final class Prefs {
         switch (key) {
             case THIRD_PARTY_COOKIES:
             case USER_SCRIPT_ON:
+            case KEEP_VISIBLE:
                 return false;
             default:
                 return true;
