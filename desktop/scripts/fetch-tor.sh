@@ -2,7 +2,7 @@
 # Downloads the official Tor Expert Bundle for Windows, checks its signature against the
 # Tor Browser Developers key, and unpacks tor.exe and the bridge transports into desktop/tor.
 set -euo pipefail
-VERSION="${TOR_BUNDLE_VERSION:-15.0.26}"
+VERSION="${TOR_BUNDLE_VERSION:-16.0.1}"
 KEY_FPR="EF6E286DDA85EA2A4BA7DE684E2C6E8793298290"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"

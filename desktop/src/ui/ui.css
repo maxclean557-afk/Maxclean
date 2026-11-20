@@ -7,6 +7,7 @@
   --ease: cubic-bezier(.2,.9,.3,1);
   color-scheme: dark;
 }
+:root.amoled { --bg: #000000; --panel: #0A0A0A; --field: #000000; --line: rgba(255,255,255,.12); }
 :root.light {
   --bg: #F6F7F9; --panel: #FFFFFF; --field: #EDEFF3; --text: #14171C; --muted: #5E6673;
   --glass: rgba(255,255,255,.7); --line: rgba(20,23,28,.10);

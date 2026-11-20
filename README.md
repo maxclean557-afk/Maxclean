@@ -19,10 +19,10 @@
 
 | Вариант | Файл |
 |---|---|
-| Установщик | [`Maxclean-Full-1.3.0-setup.exe`](../../releases/download/desktop-v1.3.0/Maxclean-Full-1.3.0-setup.exe) |
-| Без установки (portable) | [`Maxclean-Full-1.3.0-portable.exe`](../../releases/download/desktop-v1.3.0/Maxclean-Full-1.3.0-portable.exe) |
+| Установщик | [`Maxclean-Full-1.3.3-setup.exe`](../../releases/download/desktop-v1.3.3/Maxclean-Full-1.3.3-setup.exe) |
+| Без установки (portable) | [`Maxclean-Full-1.3.3-portable.exe`](../../releases/download/desktop-v1.3.3/Maxclean-Full-1.3.3-portable.exe) |
 
-Maxclean Full для Windows: тот же интерфейс, Tor с мостами, цепочки прокси, блокировщик, профили устройств и проверка утечек. Код — в папке [`desktop`](desktop).
+Maxclean Full для Windows: тот же интерфейс, Tor 0.4.9.16 с мостами, цепочки прокси, блокировщик, профили устройств, проверка утечек, часовой пояс UTC, режим «Максимальная защита», JavaScript по сайтам, фоновая активность вкладок, видео на весь экран, перевод страниц и проверка обновлений через Tor. Код — в папке [`desktop`](desktop).
 
 - Файлы собираются на серверах GitHub из этого кода ([`.github/workflows/desktop.yml`](.github/workflows/desktop.yml)), контрольные суммы — в `SHA256SUMS-windows.txt` в том же релизе.
 - `tor.exe` и мосты (Lyrebird: obfs4, Snowflake, WebTunnel) берутся из официального Tor Expert Bundle; подпись проверяется ключом Tor Project ([`desktop/scripts/fetch-tor.sh`](desktop/scripts/fetch-tor.sh)).

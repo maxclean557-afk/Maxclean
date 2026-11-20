@@ -50,6 +50,8 @@ const tor = new Tor(path.join(RES, 'tor'), path.join(SETTINGS_DIR, 'tor'));
 const blocker = new Blocker(path.join(__dirname, 'assets', 'filters'));
 const FP_SEED = crypto.randomBytes(4).readUInt32BE(0);
 const FP_JS = fs.readFileSync(path.join(__dirname, 'assets', 'fingerprint.js'), 'utf8').replace(/^(\/\/[^\n]*\n)+/, '');
+const TZ_JS = fs.readFileSync(path.join(__dirname, 'assets', 'timezone.js'), 'utf8').replace(/^(\/\/[^\n]*\n)+/, '');
+const KV_JS = fs.readFileSync(path.join(__dirname, 'assets', 'keep_visible.js'), 'utf8').replace(/^(\/\/[^\n]*\n)+/, '');
 const COSMETIC = fs.readFileSync(path.join(__dirname, 'assets', 'filters', 'cosmetic.css'), 'utf8');
 const COOKIE_CSS = fs.readFileSync(path.join(__dirname, 'assets', 'filters', 'cookie_banners.css'), 'utf8');
 const BLACKHOLE = 'socks5://127.0.0.1:9';
@@ -94,8 +96,10 @@ function setupSession() {
   ses = session.fromPartition('maxclean-' + crypto.randomBytes(6).toString('hex'), { cache: false });
   ses.setUserAgent(USER_AGENT, 'ru-RU,ru;q=0.9,en;q=0.8');
   ses.setSpellCheckerEnabled(false);
-  ses.setPermissionRequestHandler((wc, perm, cb) => cb(false));
-  ses.setPermissionCheckHandler(() => false);
+  // Everything is refused (camera, microphone, location, notifications…) except full screen,
+  // which a video player asks for when you press its full-screen button.
+  ses.setPermissionRequestHandler((wc, perm, cb) => cb(perm === 'fullscreen'));
+  ses.setPermissionCheckHandler((wc, perm) => perm === 'fullscreen');
   ses.setProxy({ proxyRules: BLACKHOLE });
   ses.on('will-download', (e) => {
     e.preventDefault();
@@ -127,7 +131,22 @@ function setupSession() {
       h['Sec-GPC'] = '1';
       h.DNT = '1';
     }
+    if (!settings.get('cookies')) for (const k of Object.keys(h)) if (/^cookie$/i.test(k)) delete h[k];
     cb({ requestHeaders: h });
+  });
+  ses.webRequest.onHeadersReceived((details, cb) => {
+    const type = details.resourceType;
+    const h = details.responseHeaders || {};
+    let changed = false;
+    if (!settings.get('cookies')) {
+      for (const k of Object.keys(h)) if (/^set-cookie$/i.test(k)) { delete h[k]; changed = true; }
+    }
+    // JavaScript off, and this site isn't in the list: the page and its frames may not run scripts.
+    if ((type === 'mainFrame' || type === 'subFrame') && !jsAllowed(details.url)) {
+      h['Content-Security-Policy'] = ["script-src 'none'; worker-src 'none'"];
+      changed = true;
+    }
+    cb(changed ? { responseHeaders: h } : {});
   });
   ses.protocol.handle('maxclean', (req) => serveInternal(req));
 }
@@ -142,14 +161,16 @@ function serveInternal(req) {
 
 // ---------------------------------------------------------------- start page
 
-const ACCENTS = { mint: '#2BD4A4', violet: '#9B6BFF', ocean: '#3D8BFF', amber: '#FF9F1C', rose: '#FF5C8A' };
+const ACCENTS = { mint: '#2BD4A4', violet: '#9B6BFF', ocean: '#3D8BFF', amber: '#FF9F1C', rose: '#FF5C8A', ruby: '#FF4D4F',
+  lime: '#A3E635', sky: '#38BDF8', gold: '#F5C542', coral: '#FF7A59', lavender: '#C4B5FD', snow: '#E8ECF1' };
 
 function palette() {
   const theme = settings.get('theme');
-  const dark = theme === 'dark' || (theme === 'system' && nativeTheme.shouldUseDarkColors);
+  const amoled = theme === 'amoled';
+  const dark = amoled || theme === 'dark' || (theme === 'system' && nativeTheme.shouldUseDarkColors);
   return {
     dark,
-    bg: dark ? '#0E1116' : '#F6F7F9',
+    bg: amoled ? '#000000' : dark ? '#0E1116' : '#F6F7F9',
     text: dark ? '#E8ECF1' : '#14171C',
     muted: dark ? '#8A94A3' : '#5E6673',
     accent: ACCENTS[settings.get('accent')] || ACCENTS.mint,
@@ -191,6 +212,33 @@ function homeHtml() {
     .replace('{{TILES}}', tiles);
 }
 
+// ---------------------------------------------------------------- JavaScript per site
+
+/** "https://www.Example.com/x" → "example.com"; null for pages without a web host. */
+function siteOf(url) {
+  try {
+    const u = new URL(url);
+    if (!/^https?:$/.test(u.protocol) || !u.hostname) return null;
+    return u.hostname.toLowerCase().replace(/^www\./, '');
+  } catch (e) { return null; }
+}
+
+function jsList() {
+  return [...new Set(settings.get('jsSites').split(/\s+/).map(d => d.trim().toLowerCase().replace(/^www\./, '')).filter(Boolean))];
+}
+
+/** The listed domain that covers this host (subdomains included), or null. */
+function jsMatch(host) {
+  return jsList().find(d => host === d || host.endsWith('.' + d)) || null;
+}
+
+/** JavaScript is on everywhere, or this site is in the list (like NoScript in Tor Browser). */
+function jsAllowed(url) {
+  if (settings.get('javascript')) return true;
+  const host = siteOf(url);
+  return !host || !!jsMatch(host);
+}
+
 // ---------------------------------------------------------------- page script
 
 const PROFILES = {
@@ -216,6 +264,8 @@ function pageScript() {
   if (settings.get('gpc')) {
     js += "try{Object.defineProperty(navigator,'globalPrivacyControl',{value:true});}catch(e){}";
   }
+  if (settings.get('fakeTimezone')) js += 'try{(' + TZ_JS + ')();}catch(e){}';
+  if (settings.get('keepVisible')) js += 'try{(' + KV_JS + ')();}catch(e){}';
   let place = PLACES[settings.get('fakeGeo')];
   if (settings.get('fakeGeo') === 'custom') {
     const n = settings.get('fakeGeoCustom').replace(/\s/g, '').split(',').map(Number);
@@ -249,6 +299,7 @@ function tabInfo(t) {
   const wc = t.view.webContents;
   return {
     id: t.id, title: t.title, url: t.home ? '' : wc.getURL(), loading: wc.isLoading(),
+    site: t.home ? null : siteOf(wc.getURL()), js: jsAllowed(wc.getURL()),
     canBack: wc.navigationHistory.canGoBack(), canForward: wc.navigationHistory.canGoForward(),
   };
 }
@@ -261,9 +312,11 @@ function layout() {
   if (!win) return;
   const [w, h] = win.getContentSize();
   for (const t of tabs) {
-    const show = t === current && !overlayOpen;
+    const show = t === current && (!overlayOpen || t.full);
     t.view.setVisible(show);
-    if (show) t.view.setBounds({ x: 0, y: topInset, width: w, height: Math.max(0, h - topInset) });
+    // A video in full screen covers the whole window; otherwise the page sits under the bar.
+    const top = t.full ? 0 : topInset;
+    if (show) t.view.setBounds({ x: 0, y: top, width: w, height: Math.max(0, h - top) });
   }
 }
 
@@ -279,9 +332,9 @@ function newTab(url) {
       nodeIntegrationInSubFrames: true,
       preload: path.join(__dirname, 'preload-page.js'),
       spellcheck: false,
-      javascript: settings.get('javascript'),
+      javascript: true, // when JavaScript is off it is blocked per site (see onHeadersReceived)
       safeDialogs: true,
-      backgroundThrottling: true,
+      backgroundThrottling: !settings.get('keepVisible'),
     },
   });
   view.setBackgroundColor(palette().bg);
@@ -317,6 +370,16 @@ function newTab(url) {
     return { action: 'deny' };
   });
   wc.on('before-input-event', (e, input) => handleKeys(e, input));
+  wc.on('enter-html-full-screen', () => {
+    t.full = true;
+    win.setFullScreen(true);
+    layout();
+  });
+  wc.on('leave-html-full-screen', () => {
+    t.full = false;
+    win.setFullScreen(false);
+    layout();
+  });
   win.contentView.addChildView(view);
   tabs.push(t);
   load(t, url || 'maxclean://home/');
@@ -376,6 +439,11 @@ function handleKeys(e, input) {
   if (input.type !== 'keyDown') return;
   const ctrl = input.control || input.meta;
   const k = input.key.toLowerCase();
+  if (k === 'escape' && current && current.full) {
+    e.preventDefault();
+    current.view.webContents.executeJavaScript('document.exitFullscreen && document.exitFullscreen()', true).catch(() => {});
+    return;
+  }
   if (ctrl && k === 't') { e.preventDefault(); switchTo(newTab(null)); toUi('focus-url'); }
   else if (ctrl && k === 'w') { e.preventDefault(); if (current) closeTab(current); }
   else if (ctrl && (k === 'l' || k === 'k')) { e.preventDefault(); toUi('focus-url'); }
@@ -470,6 +538,7 @@ async function applyNetwork() {
 
 function routeReady(text) {
   setRoute({ ready: true, failed: false, progress: 100, text });
+  checkUpdates(false);
   for (const t of tabs) {
     if (t.pending) {
       const u = t.pending;
@@ -481,9 +550,45 @@ function routeReady(text) {
   }
 }
 
+// ---------------------------------------------------------------- updates
+
+/** "1.3.10" is newer than "1.3.9". */
+function newer(remote, local) {
+  const a = remote.split(/[^0-9]+/).filter(Boolean).map(Number);
+  const b = local.split(/[^0-9]+/).filter(Boolean).map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
+  }
+  return false;
+}
+
+/**
+ * Asks GitHub, through the same route as the pages (Tor), whether a newer Windows release is out.
+ * Once a day by itself, or when asked from the menu. It only tells you and opens the release page;
+ * nothing is downloaded or installed on its own.
+ */
+async function checkUpdates(manual) {
+  if (!manual && (!settings.get('updateCheck') || Date.now() - settings.get('updateLast') < 24 * 3600 * 1000)) return;
+  if (!route.ready) { if (manual) toUi('toast', 'Сначала дождитесь подключения'); return; }
+  try {
+    const r = await ses.fetch('https://api.github.com/repos/maxclean557-afk/Maxclean/releases?per_page=30',
+      { headers: { Accept: 'application/vnd.github+json' } });
+    const list = await r.json();
+    settings.set({ updateLast: Date.now() });
+    const best = (Array.isArray(list) ? list : [])
+      .filter(x => /^desktop-v/.test(x.tag_name || '') && !x.draft && !x.prerelease)
+      .map(x => ({ v: x.tag_name.replace(/^desktop-v/, ''), url: x.html_url }))
+      .sort((x, y) => (newer(x.v, y.v) ? -1 : 1))[0];
+    if (best && newer(best.v, app.getVersion())) toUi('update', best.v, best.url);
+    else if (manual) toUi('toast', 'У вас последняя версия: ' + app.getVersion());
+  } catch (e) {
+    if (manual) toUi('toast', 'Не удалось проверить обновления: ' + e.message);
+  }
+}
+
 // ---------------------------------------------------------------- interface messages
 
-ipcMain.on('ui-ready', () => { sendTabs(); toUi('route', route, settings.get('tor')); toUi('settings', settings.all(), palette()); });
+ipcMain.on('ui-ready', () => { toUi('version', app.getVersion()); sendTabs(); toUi('route', route, settings.get('tor')); toUi('settings', settings.all(), palette()); });
 ipcMain.on('layout', (e, top) => { topInset = Math.round(top); layout(); });
 ipcMain.on('navigate', (e, text) => { if (current) navigate(current, text); });
 ipcMain.on('new-tab', () => switchTo(newTab(null)));
@@ -496,6 +601,26 @@ ipcMain.on('home', () => current && load(current, 'maxclean://home/'));
 ipcMain.on('open-url', (e, url) => switchTo(newTab(url)));
 ipcMain.on('toggle-tor', () => { settings.set({ tor: !settings.get('tor') }); toUi('settings', settings.all(), palette()); applyNetwork(); });
 ipcMain.on('retry', () => applyNetwork());
+ipcMain.on('check-updates', () => checkUpdates(true));
+ipcMain.on('translate', () => {
+  if (!current) return;
+  const url = current.view.webContents.getURL();
+  if (!/^https?:/i.test(url) || /translate\.google\.|\.translate\.goog\//.test(url)) {
+    return toUi('toast', 'Откройте сайт, чтобы перевести его');
+  }
+  load(current, 'https://translate.google.com/translate?sl=auto&tl=ru&u=' + encodeURIComponent(url));
+});
+ipcMain.on('toggle-site-js', () => {
+  if (!current) return;
+  const host = siteOf(current.view.webContents.getURL());
+  if (!host) return toUi('toast', 'Откройте сайт, чтобы разрешить ему JavaScript');
+  const list = jsList();
+  const hit = jsMatch(host);
+  settings.set({ jsSites: (hit ? list.filter(d => d !== hit) : list.concat(host)).join('\n') });
+  toUi('settings', settings.all(), palette());
+  toUi('toast', (hit ? 'JavaScript запрещён для ' : 'JavaScript разрешён для ') + host);
+  current.view.webContents.reload();
+});
 ipcMain.on('wipe-exit', async () => { for (const t of tabs) t.view.webContents.close(); await wipeSession(); app.quit(); });
 ipcMain.handle('overlay', async (e, open) => {
   // While a panel is open the page view is hidden; the interface shows its picture, blurred.
@@ -512,7 +637,7 @@ ipcMain.on('set-settings', (e, changes) => {
   blocker.refresh(settings.all());
   toUi('settings', settings.all(), palette());
   if (settings.networkSignature() !== netSig) applyNetwork();
-  for (const t of tabs) t.view.webContents.setBackgroundThrottling(true);
+  for (const t of tabs) t.view.webContents.setBackgroundThrottling(!settings.get('keepVisible'));
 });
 ipcMain.on('window', (e, what) => {
   if (what === 'min') win.minimize();
@@ -581,7 +706,11 @@ function selfTest(dir) {
         if (!wc.getURL().startsWith('https://check.torproject.org')) return;
         wc.removeListener('did-finish-load', onLoad);
         await new Promise(r => setTimeout(r, 1500));
-        const text = await wc.executeJavaScript('document.body.innerText.slice(0, 300)').catch(e => 'ERR ' + e.message);
+        const text = await wc.executeJavaScript(
+          "(document.body.innerText.match(/(Congratulations|Sorry)[^\\n]*/) || ['no verdict'])[0]"
+          + " + ' | IP: ' + ((document.body.innerText.match(/IP address appears to be:\\s*([0-9a-f.:]+)/i) || [])[1] || '?')"
+          + " + ' | UTC offset: ' + new Date().getTimezoneOffset() + ' | Intl zone: ' + Intl.DateTimeFormat().resolvedOptions().timeZone"
+        ).catch(e => 'ERR ' + e.message);
         log('check.torproject.org says:', JSON.stringify(text));
         await shoot('3-check');
         app.quit();

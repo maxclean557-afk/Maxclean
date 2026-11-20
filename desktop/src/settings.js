@@ -19,6 +19,11 @@ const DEFAULTS = {
   hideAdBlocks: true,
   hideCookieBanners: true,
   javascript: true,
+  jsSites: '',                // sites allowed to run JavaScript while it is off, one per line
+  fakeTimezone: true,         // pages see UTC, as in Tor Browser
+  keepVisible: false,         // pages always see their tab as visible and focused
+  updateCheck: true,          // once a day, through Tor, ask GitHub for a newer Windows release
+  updateLast: 0,
   cookies: true,
   thirdPartyCookies: false,
   fingerprint: true,
@@ -30,7 +35,7 @@ const DEFAULTS = {
   disableWebrtc: true,
   engine: 0,
   customEngine: '',
-  theme: 'dark',              // dark | light | system
+  theme: 'dark',              // dark | amoled | light | system
   accent: 'mint',
   animations: true,
   quickLinks: 'DuckDuckGo | https://duckduckgo.com\nВикипедия | https://ru.wikipedia.org\nПроверка Tor | https://check.torproject.org\nMaxclean | https://github.com/maxclean557-afk/Maxclean',

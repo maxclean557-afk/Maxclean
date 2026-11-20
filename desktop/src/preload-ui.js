@@ -25,5 +25,8 @@ contextBridge.exposeInMainWorld('mc', {
   setSettings: (s) => send('set-settings', s),
   windowCmd: (w) => send('window', w),
   github: () => send('open-external-github'),
+  checkUpdates: () => send('check-updates'),
+  translate: () => send('translate'),
+  toggleSiteJs: () => send('toggle-site-js'),
   on,
 });

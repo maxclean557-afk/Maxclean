@@ -9,11 +9,16 @@ let settings = {};
 let route = { ready: false, text: '', failed: false, progress: 0 };
 let torOn = true;
 let stripTimer = null;
+let version = '';
 
 const ENGINES = ['Maxclean (анонимный)', 'DuckDuckGo', 'Google', 'Яндекс', 'Bing', 'Yahoo', 'Brave Search',
   'Startpage', 'Ecosia', 'Qwant', 'Mojeek', 'Mail.ru', 'Baidu', 'Свой (из настроек)'];
 const SHORT = ['MC', 'DDG', 'G', 'Я', 'B', 'Y!', 'Br', 'SP', 'Ec', 'Qw', 'Mj', '@', '百', '★'];
-const ACCENTS = { mint: ['Мята', '#2BD4A4'], violet: ['Фиалка', '#9B6BFF'], ocean: ['Океан', '#3D8BFF'], amber: ['Янтарь', '#FF9F1C'], rose: ['Роза', '#FF5C8A'] };
+// Private search engines first, as on Android.
+const MENU_ORDER = [0, 1, 6, 7, 10, 9, 8, 2, 4, 5, 3, 11, 12, 13];
+const ACCENTS = { mint: ['Мята', '#2BD4A4'], violet: ['Фиалка', '#9B6BFF'], ocean: ['Океан', '#3D8BFF'], amber: ['Янтарь', '#FF9F1C'],
+  rose: ['Роза', '#FF5C8A'], ruby: ['Рубин', '#FF4D4F'], lime: ['Лайм', '#A3E635'], sky: ['Небо', '#38BDF8'],
+  gold: ['Золото', '#F5C542'], coral: ['Коралл', '#FF7A59'], lavender: ['Лаванда', '#C4B5FD'], snow: ['Снег', '#E8ECF1'] };
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -88,6 +93,7 @@ function reportLayout() {
 function applyLook() {
   const light = settings.theme === 'light' || (settings.theme === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
   document.documentElement.classList.toggle('light', light);
+  document.documentElement.classList.toggle('amoled', settings.theme === 'amoled');
   const a = (ACCENTS[settings.accent] || ACCENTS.mint)[1];
   document.documentElement.style.setProperty('--accent', a);
   document.body.classList.toggle('noanim', !settings.animations);
@@ -146,18 +152,25 @@ function showMenu() {
     }
     p.append(bigs);
     p.append(el('div', { style: 'height:10px' }));
-    const rows = [
+    const cur = tabs.find(t => t.id === currentId);
+    const rows = [];
+    if (cur && cur.site && !settings.javascript) {
+      rows.push(['⚡', (cur.js ? 'Запретить' : 'Разрешить') + ' JavaScript для ' + cur.site, () => window.mc.toggleSiteJs()]);
+    }
+    rows.push(
+      ['🌐', 'Перевести страницу', () => window.mc.translate()],
+      ['⬆', 'Проверить обновления', () => window.mc.checkUpdates()],
       ['🔍', 'Проверка утечек', showLeakTests],
       ['⚙', 'Настройки', showSettings],
       ['⌨', 'Горячие клавиши', showKeys],
-      ['</>', 'Открытый код на GitHub', () => window.mc.github()],
-    ];
+      ['&lt;/&gt;', 'Открытый код на GitHub', () => window.mc.github()],
+    );
     for (const [g, label, fn] of rows) {
       const r = el('button', { className: 'row' }, '<span>' + g + '</span>' + label);
       r.onclick = () => { closeOverlay(); setTimeout(fn, 60); };
       p.append(r);
     }
-    p.append(el('div', { className: 'foot' }, 'Maxclean 1.3 Full для Windows · ничего не сохраняется'));
+    p.append(el('div', { className: 'foot' }, 'Maxclean ' + esc(version) + ' Full для Windows · ничего не сохраняется'));
   });
 }
 
@@ -165,7 +178,7 @@ function showEngines() {
   openOverlay((p) => {
     p.append(el('h2', {}, 'Искать через'));
     const list = el('div', { className: 'list' });
-    ENGINES.forEach((name, i) => {
+    MENU_ORDER.map(i => [ENGINES[i], i]).forEach(([name, i]) => {
       const r = el('button', { className: 'row' + (settings.engine === i ? ' on' : '') }, esc(name) + '<small>' + SHORT[i] + '</small>');
       r.onclick = () => { window.mc.setSettings({ engine: i }); closeOverlay(); };
       list.append(r);
@@ -233,8 +246,34 @@ function textField(p, key, multi, placeholder) {
 function showSettings() {
   openOverlay((p) => {
     p.append(el('h2', {}, 'Настройки'));
+    p.append(el('p', { className: 'hint' }, 'Версия ' + esc(version)));
+    p.append(el('h3', {}, '⚡ Режим защиты'));
+    const max = !settings.javascript && !settings.cookies;
+    p.append(el('p', { className: 'hint' }, max ? 'Сейчас: максимальная защита.' : 'Сейчас: обычный режим — сайты работают как обычно.'));
+    const presets = el('div', { className: 'choice' });
+    for (const [isMax, label] of [[true, '🛡 Максимальная'], [false, '↺ Обычный']]) {
+      const b = el('button', { className: 'chip' + (isMax === max ? ' on' : '') }, label);
+      b.onclick = () => {
+        const msg = isMax
+          ? 'Включится всё сразу: Tor, все блокировки, защита от отпечатка, часовой пояс UTC, только HTTPS, без WebRTC, сайтам — отказ в местоположении.\n\nВыключатся JavaScript и cookies. Так безопаснее всего, но многие сайты не будут работать. Нужным сайтам JavaScript можно разрешить через меню.'
+          : 'JavaScript и cookies снова включатся, сайты будут работать как обычно. Tor, блокировщик и остальная защита останутся как есть.';
+        if (!confirm(msg)) return;
+        const c = isMax
+          ? { javascript: false, cookies: false, tor: true, blockAds: true, blockTrackers: true, blockSocial: true, blockMiners: true,
+              blockPopups: true, hideAdBlocks: true, hideCookieBanners: true, fingerprint: true, fakeTimezone: true, httpsOnly: true,
+              disableWebrtc: true, gpc: true, thirdPartyCookies: false, keepVisible: false, deviceProfile: 'generic', fakeGeo: 'off' }
+          : { javascript: true, cookies: true };
+        Object.assign(settings, c);
+        window.mc.setSettings(c);
+        closeOverlay();
+        setTimeout(showSettings, 80);
+      };
+      presets.append(b);
+    }
+    p.append(presets);
+
     p.append(el('h3', {}, '🎨 Оформление'));
-    chips(p, 'theme', [['dark', 'Тёмная'], ['light', 'Светлая'], ['system', 'Как в Windows']]);
+    chips(p, 'theme', [['dark', 'Тёмная'], ['amoled', 'Чёрная AMOLED'], ['light', 'Светлая'], ['system', 'Как в Windows']]);
     chips(p, 'accent', Object.entries(ACCENTS).map(([k, [n, c]]) => [k, '<span class="dotc" style="background:' + c + '"></span>' + n]));
     toggle(p, 'animations', 'Анимации', 'Плавные вкладки, панели и стартовая страница');
 
@@ -266,10 +305,20 @@ function showSettings() {
     toggle(p, 'disableWebrtc', 'Отключить WebRTC', 'Иначе сайт может узнать ваш IP даже через Tor');
     toggle(p, 'httpsOnly', 'Только HTTPS', 'http:// открывается как https://, незашифрованное блокируется');
     toggle(p, 'gpc', 'Сигнал «Не отслеживать» (GPC)', 'Законный запрет продавать ваши данные');
-    toggle(p, 'javascript', 'JavaScript', 'Применится к новым вкладкам');
+    toggle(p, 'javascript', 'JavaScript', 'Без него безопаснее, но многие сайты сломаются');
+    p.append(el('p', { className: 'hint' }, 'Сайты, где JavaScript разрешён, когда он выключен: по одному в строке, поддомены входят. Добавить открытый сайт — ⋮ → «Разрешить JavaScript…».'));
+    textField(p, 'jsSites', true, 'youtube.com\nweb.telegram.org');
+    toggle(p, 'cookies', 'Разрешить cookies', 'Нужны для входа на сайты. Стираются при закрытии вкладки');
+    toggle(p, 'fakeTimezone', 'Часовой пояс UTC', 'Сайты не узнают ваш пояс, как в Tor Browser. Время на сайтах будет по UTC');
     p.append(el('p', { className: 'hint' }, 'Местоположение для сайтов, которые его спрашивают:'));
     chips(p, 'fakeGeo', [['off', 'Не сообщать'], ['moscow', 'Москва'], ['amsterdam', 'Амстердам'], ['berlin', 'Берлин'], ['newyork', 'Нью-Йорк'], ['tokyo', 'Токио'], ['custom', 'Свои']]);
     textField(p, 'fakeGeoCustom', false, 'широта, долгота — например 41.0082, 28.9784');
+
+    p.append(el('h3', {}, '▶ Фон'));
+    toggle(p, 'keepVisible', 'Фоновая активность вкладок', 'Сайты считают вкладку открытой, даже когда окно свёрнуто или открыта другая вкладка: видео, музыка и веб-приложения не останавливаются. Выключается в режиме «Максимальная защита»');
+
+    p.append(el('h3', {}, '⬆ Обновления'));
+    toggle(p, 'updateCheck', 'Проверять обновления', 'Раз в сутки спрашивает GitHub через Tor, нет ли новой версии для Windows. Ничего не скачивает само — только сообщает');
 
     p.append(el('h3', {}, '⭐ Стартовая страница'));
     p.append(el('p', { className: 'hint' }, 'Плитки: «Название | адрес», по одному в строке, до 8.'));
@@ -332,6 +381,8 @@ window.mc.on('route', (r, on) => { route = r; torOn = on; renderRoute(); });
 window.mc.on('blocked', (n) => { const b = $('blocked'); b.textContent = n; b.classList.toggle('has', n > 0); });
 window.mc.on('toast', (text) => showStrip(text, false, null, null, 2600));
 window.mc.on('focus-url', () => { $('url').focus(); });
+window.mc.on('version', (v) => { version = v; });
+window.mc.on('update', (v, url) => showStrip('Вышла Maxclean ' + v + ' для Windows', false, 'Открыть', () => { window.mc.openUrl(url); $('strip').classList.remove('show'); reportLayout(); }));
 let firstSettings = true;
 window.mc.on('settings', (s) => {
   settings = s;
